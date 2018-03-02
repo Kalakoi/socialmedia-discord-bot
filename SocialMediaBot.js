@@ -1,54 +1,54 @@
 const https = require("https"),
-      fs = require("fs"),
-      Discord = require("discord.js"),
-      bot = new Discord.Client(),
-      channelPath = __dirname + "\\channels",
-	  settingsPath = __dirname + "\\settings";
+	fs = require("fs"),
+	Discord = require("discord.js"),
+	bot = new Discord.Client(),
+	channelPath = __dirname + "\\channels",
+	settingsPath = __dirname + "\\settings";
 var servers = [];
 var settings;
 
 function leadingZero(d){
-    if(d < 10){
-        return "0" + d;
-    }else{
-        return d;
-    }
+	if(d < 10) {
+		return "0" + d;
+	} else {
+		return d;
+	}
 }
 
-function print(msg, err){
-    var date = new Date();
-    var h = leadingZero(date.getHours());
-    var m = leadingZero(date.getMinutes());
-    var s = leadingZero(date.getSeconds());
+function print(msg, err) {
+	var date = new Date();
+	var h = leadingZero(date.getHours());
+	var m = leadingZero(date.getMinutes());
+	var s = leadingZero(date.getSeconds());
 
-    console.log("[" + h + ":" + m + ":" + s + "]", msg);
-    if(err){
-        console.log(err);
-    }
+	console.log("[" + h + ":" + m + ":" + s + "]", msg);
+	if(err) {
+		console.log(err);
+	}
 }
 
-function indexOfObjectByName(array, value){
-    for(let i = 0; i < array.length; i++){
-        if(array[i].name.toLowerCase().trim() === value.toLowerCase().trim()){
-            return i;
-        }
-    }
-    return -1;
+function indexOfObjectByName(array, value) {
+	for(let i = 0; i < array.length; i++) {
+		if(array[i].name.toLowerCase().trim() === value.toLowerCase().trim()) {
+			return i;
+		}
+	}
+	return -1;
 }
 
-function exitHandler(opt, err){
-    if(err){
-        print(err);
-    }
-    if(opt.save){
-        print("Saving channels to " + channelPath + " before exiting");
-        print(JSON.stringify(servers));
-        fs.writeFileSync(channelPath, JSON.stringify(servers, null, 4));
-        print("Done");
-    }
-    if(opt.exit){
-        process.exit();
-    }
+function exitHandler(opt, err) {
+	if(err) {
+		print(err);
+	}
+	if(opt.save) {
+		print("Saving channels to " + channelPath + " before exiting");
+		print(JSON.stringify(servers));
+		fs.writeFileSync(channelPath, JSON.stringify(servers, null, 4));
+		print("Done");
+	}
+	if(opt.exit) {
+		process.exit();
+	}
 }
 
 process.on("exit", exitHandler.bind(null, {save:true}));
@@ -56,685 +56,651 @@ process.on("SIGINT", exitHandler.bind(null, {exit:true}));
 process.on("SIGTERM", exitHandler.bind(null, {exit:true}));
 process.on("uncaughtException", exitHandler.bind(null, {exit:true}));
 
-function callTwitchApi(server, twitchChannel, callback, getStreamInfo){
-    var opt;
-    try {
-        var apiPath;
-        if(getStreamInfo){
-            apiPath = "/kraken/streams/" + twitchChannel.name.trim();
-        }else{
-            apiPath = "/kraken/channels/" + twitchChannel.name.trim();
-        }
-        opt = {
-            host: "api.twitch.tv",
-            path: apiPath,
-            headers: {
-                "Client-ID": settings.twitchClientID,
-                Accept: "application/vnd.twitchtv.v3+json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
-
-    https.get(opt, (res)=>{
-        var body = "";
-
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
-
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, undefined, undefined);
-            }else{
-                callback(server, twitchChannel, json);
-            }
-        });
-
-    }).on("error", (err)=>{
-        print(err);
-    });
-}
-
-function twitchApiCallback(server, twitchChannel, res){
-    if(res && !twitchChannel.online && res.stream && res.stream.created_at > twitchChannel.timestamp){ 
-        try {
-            var channels = [], defaultChannel;
-            var guild = bot.guilds.find("name", server.name);
-
-
-            if(server.discordChannels.length === 0){
-                defaultChannel = guild.channels.find("type", "text");
-            }else{
-                for(let i = 0; i < server.discordChannels.length; i++){
-                    channels.push(guild.channels.find("name", server.discordChannels[i]));
-                }
-            }
-            var embed = new Discord.RichEmbed()
-                        .setColor("#6441A4")
-                        .setTitle(res.stream.channel.display_name.replace(/_/g, "\\_"))
-                        .setURL(res.stream.channel.url)
-                        .setDescription("**" + res.stream.channel.status +
-                                        "**\n" + res.stream.game)
-                        .setImage(res.stream.preview.large)
-                        .setThumbnail(res.stream.channel.logo)
-                        //.addField("Viewers", res.stream.viewers, true)
-                        .addField("Followers", res.stream.channel.followers, true)
-						.setFooter("Twitch", "https://4shoreg.files.wordpress.com/2015/04/twitch.png");
-
-            if(channels.length !== 0){
-                for(let i = 0; i < channels.length; i++){
-					channels[i].send(embed).then(
-                        print("Sent Twitch embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
-                }
-                twitchChannel.online = true;
-                twitchChannel.timestamp = res.stream.created_at;
-            }else if(defaultChannel){
-				defaultChannel.send(embed).then(
-                    print("Sent Twitch embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
-                twitchChannel.online = true;
-                twitchChannel.timestamp = res.stream.created_at;
-            }
-        }
-        catch(err){
-            print(err);
-        }
-    }else if(res.stream === null){
-        twitchChannel.online = false;
-    }
-}
-
-function callTwitterApi(server, twitterFeed, callback){
+function callTwitchApi(server, twitchChannel, callback, getStreamInfo) {
 	var opt;
 	try {
-        var apiPath = "/1.1/statuses/user_timeline.json?count=1&include_rts=false&screen_name=" + twitterFeed.name.trim();
-        opt = {
-            host: "api.twitter.com",
-            path: apiPath,
-            headers: {
-                Authorization: "Bearer " + settings.twitterBearerToken,
-				Accept:"application/json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
+		var apiPath;
+		if(getStreamInfo) {
+			apiPath = "/kraken/streams/" + twitchChannel.name.trim();
+		} else {
+			apiPath = "/kraken/channels/" + twitchChannel.name.trim();
+		}
+		opt = {
+			host: "api.twitch.tv",
+			path: apiPath,
+			headers: {
+				"Client-ID": settings.twitchClientID,
+				Accept: "application/vnd.twitchtv.v3+json"
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
 
-    https.get(opt, (res)=>{
-        var body = "";
+	https.get(opt, (res) => {
+		var body = "";
 
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
 
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, undefined, undefined);
-            }else{
-                callback(server, twitterFeed, json);
-            }
-        });
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, undefined, undefined);
+			} else {
+				callback(server, twitchChannel, json);
+			}
+		});
 
-    }).on("error", (err)=>{
-        print(err);
-    });
+	}).on("error", (err) => {
+		print(err);
+	});
 }
 
-function twitterApiCallback(server, twitterFeed, res){
-	if(res && new Date(res[0].created_at) > new Date(twitterFeed.timestamp) && res[0].in_reply_to_status_id == null){// && res[0].retweeted == false
-        try {
-            var channels = [], defaultChannel;
-            var guild = bot.guilds.find("name", server.name);
+function twitchApiCallback(server, twitchChannel, res) {
+	if(res && !twitchChannel.online && res.stream && res.stream.created_at > twitchChannel.timestamp) { 
+		try {
+			var channels = [], defaultChannel;
+			var guild = bot.guilds.find("name", server.name);
 
-            if(server.discordChannels.length === 0){
-                defaultChannel = guild.channels.find("type", "text");
-            }else{
-                for(let i = 0; i < server.discordChannels.length; i++){
-                    channels.push(guild.channels.find("name", server.discordChannels[i]));
-                }
-            }
+			if(server.discordChannels.length === 0) {
+				defaultChannel = guild.channels.find("type", "text");
+			} else {
+				for(let i = 0; i < server.discordChannels.length; i++) {
+					channels.push(guild.channels.find("name", server.discordChannels[i]));
+				}
+			}
+			var embed = new Discord.RichEmbed()
+				.setColor("#6441A4")
+				.setTitle(res.stream.channel.display_name.replace(/_/g, "\\_"))
+				.setURL(res.stream.channel.url)
+				.setDescription("**" + res.stream.channel.status + "**\n" + res.stream.game)
+				.setImage(res.stream.preview.large)
+				.setThumbnail(res.stream.channel.logo)
+				.addField("Followers", res.stream.channel.followers, true)
+				.setFooter("Twitch", "https://4shoreg.files.wordpress.com/2015/04/twitch.png");
+
+			if(channels.length !== 0) {
+				for(let i = 0; i < channels.length; i++) {
+					channels[i].send(embed).then(
+						print("Sent Twitch embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
+				}
+				twitchChannel.online = true;
+				twitchChannel.timestamp = res.stream.created_at;
+			} else if(defaultChannel) {
+				defaultChannel.send(embed).then(
+					print("Sent Twitch embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
+				twitchChannel.online = true;
+				twitchChannel.timestamp = res.stream.created_at;
+			}
+		} catch(err) {
+			print(err);
+		}
+	} else if(res.stream === null) {
+		twitchChannel.online = false;
+	}
+}
+
+function callTwitterApi(server, twitterFeed, callback) {
+	var opt;
+	try {
+		var apiPath = "/1.1/statuses/user_timeline.json?count=1&include_rts=false&screen_name=" + twitterFeed.name.trim();
+		opt = {
+			host: "api.twitter.com",
+			path: apiPath,
+			headers: {
+				Authorization: "Bearer " + settings.twitterBearerToken,
+				Accept:"application/json"
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
+
+	https.get(opt, (res) => {
+		var body = "";
+
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
+
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, undefined, undefined);
+			} else {
+				callback(server, twitterFeed, json);
+			}
+		});
+	}).on("error", (err) => {
+		print(err);
+	});
+}
+
+function twitterApiCallback(server, twitterFeed, res) {
+	if(res && new Date(res[0].created_at) > new Date(twitterFeed.timestamp) && res[0].in_reply_to_status_id == null) {
+		try {
+			var channels = [], defaultChannel;
+			var guild = bot.guilds.find("name", server.name);
+
+			if(server.discordChannels.length === 0) {
+				defaultChannel = guild.channels.find("type", "text");
+			} else {
+				for(let i = 0; i < server.discordChannels.length; i++) {
+					channels.push(guild.channels.find("name", server.discordChannels[i]));
+				}
+			}
 			var displayMessage  = res[0].text;
-			for (l = 0; l < res[0].entities.urls.length; l++){
+			for (l = 0; l < res[0].entities.urls.length; l++) {
 				displayMessage = displayMessage.replace(res[0].entities.urls[l].url, res[0].entities.urls[l].expanded_url);
 			}
-			if (res[0].entities.media){
-				for (l = 0; l < res[0].entities.media.length; l++){
+			if (res[0].entities.media) {
+				for (l = 0; l < res[0].entities.media.length; l++) {
 					displayMessage = displayMessage.replace(res[0].entities.media[l].url, "");
 				}
 			}
-            var embed = new Discord.RichEmbed()
-                        .setColor("#00aced")
-                        .setTitle(res[0].user.name + " (@" + res[0].user.screen_name + ")")
-                        .setURL("https://twitter.com/" + res[0].user.screen_name + "/status/" + res[0].id_str)
-                        .setDescription(displayMessage)
-                        .setThumbnail(res[0].user.profile_image_url)
-						.setFooter("Twitter","http://icons.iconarchive.com/icons/uiconstock/socialmedia/512/Twitter-icon.png");
-			if (res[0].entities.media){
+			var embed = new Discord.RichEmbed()
+				.setColor("#00aced")
+				.setTitle(res[0].user.name + " (@" + res[0].user.screen_name + ")")
+				.setURL("https://twitter.com/" + res[0].user.screen_name + "/status/" + res[0].id_str)
+				.setDescription(displayMessage)
+				.setThumbnail(res[0].user.profile_image_url)
+				.setFooter("Twitter","http://icons.iconarchive.com/icons/uiconstock/socialmedia/512/Twitter-icon.png");
+			if (res[0].entities.media) {
 				embed.setImage(res[0].entities.media[0].media_url);
 			}
 			
 			embed.addField("Followers", res[0].user.followers_count, true);
 
-            if(channels.length !== 0){
-                for(let i = 0; i < channels.length; i++){
+			if(channels.length !== 0) {
+				for(let i = 0; i < channels.length; i++) {
 					channels[i].send(embed).then(
-                        print("Sent Twitter embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
-                }
+						print("Sent Twitter embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
+				}
 				twitterFeed.timestamp = res[0].created_at;
-            }else if(defaultChannel){
+			} else if(defaultChannel) {
 				defaultChannel.send(embed).then(
-                    print("Sent Twitter embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
+					print("Sent Twitter embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
 				twitterFeed.timestamp = res[0].created_at;
-            }
-        }
-        catch(err){
-            print(err);
-        }
-    }
+			}
+		} catch(err) {
+			print(err);
+		}
+	}
 }
 
-function callYouTubeApi(server, youTubeChannel, callback, getChannelInfo){
+function callYouTubeApi(server, youTubeChannel, callback, getChannelInfo) {
 	var opt;
 	try {
 		var apiPath = "";
-		if (getChannelInfo){
+		if (getChannelInfo) {
 			apiPath = "/youtube/v3/channels?part=snippet%2CcontentDetails&maxResults=1&forUsername=" + youTubeChannel.name.trim();
-		}
-		else{
+		} else {
 			apiPath = "/youtube/v3/activities?part=snippet%2CcontentDetails&channelId=" + youTubeChannel.id.trim();
 		}
 		apiPath += "&key=" + settings.youTubeApiKey;
-        opt = {
-            host: "www.googleapis.com",
-            path: apiPath,
-            headers: {
+		opt = {
+			host: "www.googleapis.com",
+			path: apiPath,
+			headers: {
 				Accept:"application/json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
 
-    https.get(opt, (res)=>{
-        var body = "";
+	https.get(opt, (res) => {
+		var body = "";
 
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
 
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, undefined, undefined);
-            }else{
-                callback(server, youTubeChannel, json);
-            }
-        });
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, undefined, undefined);
+			} else {
+				callback(server, youTubeChannel, json);
+			}
+		});
 
-    }).on("error", (err)=>{
-        print(err);
-    });
+	}).on("error", (err) => {
+		print(err);
+	});
 }
 
-function youTubeApiCallback(server, youTubeChannel, res){
-	if(res && res.pageInfo.totalResults > 0 && res.items[0].snippet.publishedAt > youTubeChannel.timestamp){
-        try {
-            var channels = [], defaultChannel;
-            var guild = bot.guilds.find("name", server.name);
+function youTubeApiCallback(server, youTubeChannel, res) {
+	if(res && res.pageInfo.totalResults > 0 && res.items[0].snippet.publishedAt > youTubeChannel.timestamp) {
+		try {
+			var channels = [], defaultChannel;
+			var guild = bot.guilds.find("name", server.name);
 
-            if(server.discordChannels.length === 0){
-                defaultChannel = guild.channels.find("type", "text");
-            }else{
-                for(let i = 0; i < server.discordChannels.length; i++){
-                    channels.push(guild.channels.find("name", server.discordChannels[i]));
-                }
-            }
+			if(server.discordChannels.length === 0) {
+				defaultChannel = guild.channels.find("type", "text");
+			} else {
+				for(let i = 0; i < server.discordChannels.length; i++) {
+					channels.push(guild.channels.find("name", server.discordChannels[i]));
+				}
+			}
 			var embed = new Discord.RichEmbed()
-                        .setColor("#ff0000")
-						.setAuthor(res.items[0].snippet.channelTitle)
-                        .setTitle(res.items[0].snippet.title)
-                        .setURL("https://www.youtube.com/watch?v=" + res.items[0].contentDetails.upload.videoId)
-                        .setDescription(res.items[0].snippet.description)
-                        .setImage(res.items[0].snippet.thumbnails.default.url)
-						.setThumbnail(youTubeChannel.icon)
-						.setFooter("YouTube","https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png");
+				.setColor("#ff0000")
+				.setAuthor(res.items[0].snippet.channelTitle)
+				.setTitle(res.items[0].snippet.title)
+				.setURL("https://www.youtube.com/watch?v=" + res.items[0].contentDetails.upload.videoId)
+				.setDescription(res.items[0].snippet.description)
+				.setImage(res.items[0].snippet.thumbnails.default.url)
+				.setThumbnail(youTubeChannel.icon)
+				.setFooter("YouTube","https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png");
 
-            if(channels.length !== 0){
-                for(let i = 0; i < channels.length; i++){
+			if(channels.length !== 0) {
+				for(let i = 0; i < channels.length; i++) {
 					channels[i].send(embed).then(
-                        print("Sent YouTube embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
-                }
+						print("Sent YouTube embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
+				}
 				youTubeChannel.timestamp = res.items[0].snippet.publishedAt;
-            }else if(defaultChannel){
+			} else if(defaultChannel) {
 				defaultChannel.send(embed).then(
-                    print("Sent YouTube embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
+					print("Sent YouTube embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
 				youTubeChannel.timestamp = res.items[0].snippet.publishedAt;
-            }
-        }
-        catch(err){
-            print(err);
-        }
-    }
+			}
+		} catch(err) {
+			print(err);
+		}
+	}
 }
 
-function getWordPressImage(server, blogSite, featuredMedia, inputRes, callback){
+function getWordPressImage(server, blogSite, featuredMedia, inputRes, callback) {
 	var opt;
 	try {
-        var apiPath = "/wp-json/wp/v2/media/" + featuredMedia;
-        opt = {
-            host: blogSite.name,
-            path: apiPath,
-            headers: {
+		var apiPath = "/wp-json/wp/v2/media/" + featuredMedia;
+		opt = {
+			host: blogSite.name,
+			path: apiPath,
+			headers: {
 				Accept:"application/json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
 	
-	https.get(opt, (res)=>{
-        var body = "";
+	https.get(opt, (res) => {
+		var body = "";
 
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
 
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, blogSite, inputRes, undefined);
-            }else{
-                callback(server, blogSite, inputRes, json.source_url);
-            }
-        });
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, blogSite, inputRes, undefined);
+			} else {
+				callback(server, blogSite, inputRes, json.source_url);
+			}
+		});
 
-    }).on("error", (err)=>{
-        print(err);
-    });
+	}).on("error", (err) => {
+		print(err);
+	});
 }
 
-function callWordPressApi(server, blogSite, callback){
+function callWordPressApi(server, blogSite, callback) {
 	var opt;
 	try {
-        var apiPath = "/wp-json/wp/v2/posts?context=embed";
-        opt = {
-            host: blogSite.name,
-            path: apiPath,
-            headers: {
+		var apiPath = "/wp-json/wp/v2/posts?context=embed";
+		opt = {
+			host: blogSite.name,
+			path: apiPath,
+			headers: {
 				Accept:"application/json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
 
-    https.get(opt, (res)=>{
-        var body = "";
+	https.get(opt, (res) => {
+		var body = "";
 
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
 
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, undefined, undefined);
-            }else{
-                callback(server, blogSite, json);
-            }
-        });
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, undefined, undefined);
+			} else {
+				callback(server, blogSite, json);
+			}
+		});
 
-    }).on("error", (err)=>{
-        print(err);
-    });
+	}).on("error", (err) => {
+		print(err);
+	});
 }
 
-function wordPressApiCallback(server, blogSite, res){
-	if (res && res[0].date > blogSite.timestamp && res[0].type == "post"){
+function wordPressApiCallback(server, blogSite, res) {
+	if (res && res[0].date > blogSite.timestamp && res[0].type == "post") {
 		blogSite.timestamp = res[0].date;
 		getWordPressImage(server, blogSite, res[0].featured_media, res, wordPressSendEmbedCallback);
 	}
 }
 
-function wordPressSendEmbedCallback(server, blogSite, res, imageLoc){
+function wordPressSendEmbedCallback(server, blogSite, res, imageLoc) {
 	try {
 		var channels = [], defaultChannel;
 		var guild = bot.guilds.find("name", server.name);
 
-		if(server.discordChannels.length === 0){
+		if(server.discordChannels.length === 0) {
 			defaultChannel = guild.channels.find("type", "text");
-		}else{
-			for(let i = 0; i < server.discordChannels.length; i++){
+		} else {
+			for(let i = 0; i < server.discordChannels.length; i++) {
 				channels.push(guild.channels.find("name", server.discordChannels[i]));
 			}
 		}
-		print(res[0].meta);
 		var embed = new Discord.RichEmbed()
-					.setColor("#21759b")
-					//.setAuthor(res.items[0].snippet.channelTitle)
-					.setTitle(res[0].title.rendered.replace("&#8211;","-").replace("&#8217;","'"))
-					.setURL(res[0].link)
-					.setDescription(res[0].excerpt.rendered.replace("<p>","").replace("</p>",""))
-					.setImage(imageLoc)
-					//.setThumbnail(youTubeChannel.icon)
-					.setFooter("WordPress","https://s.w.org/about/images/wordpress-logo-notext-bg.png");
+			.setColor("#21759b")
+			.setTitle(res[0].title.rendered.replace("&#8211;","-").replace("&#8217;","'"))
+			.setURL(res[0].link)
+			.setDescription(res[0].excerpt.rendered.replace("<p>","").replace("</p>",""))
+			.setImage(imageLoc)
+			.setFooter("WordPress","https://s.w.org/about/images/wordpress-logo-notext-bg.png");
 		
-		
-		if(channels.length !== 0){
-			for(let i = 0; i < channels.length; i++){
+		if(channels.length !== 0) {
+			for(let i = 0; i < channels.length; i++) {
 				channels[i].send(embed).then(
 					print("Sent WordPress embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
 			}
 			blogSite.timestamp = res[0].date;
-		}else if(defaultChannel){
+		} else if(defaultChannel) {
 			defaultChannel.send(embed).then(
 				print("Sent WordPress embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
 			blogSite.timestamp = res[0].date;
 		}
-	}
-	catch(err){
+	} catch(err) {
 		print(err);
 	}
 }
 
-function callMixerApi(server, mixerChannel, callback){
+function callMixerApi(server, mixerChannel, callback) {
 	var opt;
-    try {
-        var apiPath = "/api/v1/channels/" + mixerChannel.name.trim();
-        
-        opt = {
-            host: "mixer.com",
-            path: apiPath,
-            headers: {
-                Accept: "application/json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
+	try {
+		var apiPath = "/api/v1/channels/" + mixerChannel.name.trim();
 
-    https.get(opt, (res)=>{
-        var body = "";
+		opt = {
+			host: "mixer.com",
+			path: apiPath,
+			headers: {
+				Accept: "application/json"
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
 
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
+	https.get(opt, (res) => {
+		var body = "";
 
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, undefined, undefined);
-            }else{
-                callback(server, mixerChannel, json);
-            }
-        });
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
 
-    }).on("error", (err)=>{
-        print(err);
-    });
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, undefined, undefined);
+			} else {
+				callback(server, mixerChannel, json);
+			}
+		});
+
+	}).on("error", (err) => {
+		print(err);
+	});
 }
 
-function mixerApiCallback(server, mixerChannel, res){
-	if (res && !mixerChannel.online && res.online){
+function mixerApiCallback(server, mixerChannel, res) {
+	if (res && !mixerChannel.online && res.online) {
 		try {
-            var channels = [], defaultChannel;
-            var guild = bot.guilds.find("name", server.name);
+			var channels = [], defaultChannel;
+			var guild = bot.guilds.find("name", server.name);
 
-            if(server.discordChannels.length === 0){
-                defaultChannel = guild.channels.find("type", "text");
-            }else{
-                for(let i = 0; i < server.discordChannels.length; i++){
-                    channels.push(guild.channels.find("name", server.discordChannels[i]));
-                }
-            }
-            var embed = new Discord.RichEmbed()
-                        .setColor("#1fbaed")
-						.setAuthor(res.user.username, res.user.avatarUrl, "https://mixer.com/" + res.token)
-                        .setTitle(res.name)
-                        .setURL("https://mixer.com/" + res.token)
-                        .setDescription("**" + res.type.parent +
-                                        "**\n" + res.type.name)
-                        .setImage(res.type.backgroundUrl)
-                        .setThumbnail(res.thumbnail.url)
-                        .addField("Followers", res.numFollowers, true)
-						.addField("Views", res.viewersTotal, true)
-						.setFooter("Mixer", "https://firebottle.tv/projects/mixiversary/images/logo-ball.png");
+			if(server.discordChannels.length === 0) {
+				defaultChannel = guild.channels.find("type", "text");
+			} else {
+				for(let i = 0; i < server.discordChannels.length; i++) {
+					channels.push(guild.channels.find("name", server.discordChannels[i]));
+				}
+			}
+			var embed = new Discord.RichEmbed()
+				.setColor("#1fbaed")
+				.setAuthor(res.user.username, res.user.avatarUrl, "https://mixer.com/" + res.token)
+				.setTitle(res.name)
+				.setURL("https://mixer.com/" + res.token)
+				.setDescription("**" + res.type.parent + "**\n" + res.type.name)
+				.setImage(res.type.backgroundUrl)
+				.setThumbnail(res.thumbnail.url)
+				.addField("Followers", res.numFollowers, true)
+				.addField("Views", res.viewersTotal, true)
+				.setFooter("Mixer", "https://firebottle.tv/projects/mixiversary/images/logo-ball.png");
 
-            if(channels.length !== 0){
-                for(let i = 0; i < channels.length; i++){
+			if(channels.length !== 0) {
+				for(let i = 0; i < channels.length; i++) {
 					channels[i].send(embed).then(
-                        print("Sent Mixer embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
-                }
-                mixerChannel.online = true;
-                mixerChannel.timestamp = res.updatedAt;
-            }else if(defaultChannel){
+						print("Sent Mixer embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
+				}
+				mixerChannel.online = true;
+				mixerChannel.timestamp = res.updatedAt;
+			} else if(defaultChannel) {
 				defaultChannel.send(embed).then(
-                    print("Sent Mixer embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
-                mixerChannel.online = true;
-                mixerChannel.timestamp = res.updatedAt;
-            }
-        }
-        catch(err){
-            print(err);
-        }
+					print("Sent Mixer embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
+				mixerChannel.online = true;
+				mixerChannel.timestamp = res.updatedAt;
+			}
+		} catch(err) {
+			print(err);
+		}
 	} else if (res && !res.online) {
 		mixerChannel.online = false;
-	} else {
-		//mixerChannel.online = false;
 	}
 }
 
-function callFacebookApi(server, facebookPage, res, getPageInfo){
+function callFacebookApi(server, facebookPage, res, getPageInfo) {
 	var opt;
 	try {
 		var apiPath = '';
-		if (getPageInfo){
+		if (getPageInfo) {
 			apiPath = "/search?q=" + facebookPage.name + "&type=page"; 
-		}else{
+		} else {
 			apiPath = "/" + facebookPage.id + "?fields=about,cover,description,likes,link,name,picture,posts.limit(2)";
 		}
 		apiPath += "&access_token=" + settings.facebookClient + "|" + settings.facebookSecret;
-        opt = {
-            host: "graph.facebook.com",
-            path: apiPath,
-            headers: {
+		opt = {
+			host: "graph.facebook.com",
+			path: apiPath,
+			headers: {
 				Accept:"application/json"
-            }
-        };
-    }
-    catch(err){
-        print(err);
-        return;
-    }
+			}
+		};
+	} catch(err) {
+		print(err);
+		return;
+	}
 
-    https.get(opt, (res)=>{
-        var body = "";
+	https.get(opt, (res) => {
+		var body = "";
 
-        res.on("data", (chunk)=>{
-            body += chunk;
-        });
+		res.on("data", (chunk) => {
+			body += chunk;
+		});
 
-        res.on("end", ()=>{
-            var json;
-            try {
-                json = JSON.parse(body);
-            }
-            catch(err){
-                print(err);
-                return;
-            }
-            if(json.status == 404){
-                callback(server, undefined, undefined);
-            }else{
-                callback(server, facebookPage, json);
-            }
-        });
+		res.on("end", () => {
+			var json;
+			try {
+				json = JSON.parse(body);
+			} catch(err) {
+				print(err);
+				return;
+			}
+			if(json.status == 404) {
+				callback(server, undefined, undefined);
+			} else {
+				callback(server, facebookPage, json);
+			}
+		});
 
-    }).on("error", (err)=>{
-        print(err);
-    });
+	}).on("error", (err) => {
+		print(err);
+	});
 }
 
-function facebookApiCallback(server, facebookPage, res){
-	if(res && res.posts.data[0].created_time > facebookPage.timestamp && res.posts.data[0].message){
+function facebookApiCallback(server, facebookPage, res) {
+	if(res && res.posts.data[0].created_time > facebookPage.timestamp && res.posts.data[0].message) {
 		try {
-            var channels = [], defaultChannel;
-            var guild = bot.guilds.find("name", server.name);
+			var channels = [], defaultChannel;
+			var guild = bot.guilds.find("name", server.name);
 
-            if(server.discordChannels.length === 0){
-                defaultChannel = guild.channels.find("type", "text");
-            }else{
-                for(let i = 0; i < server.discordChannels.length; i++){
-                    channels.push(guild.channels.find("name", server.discordChannels[i]));
-                }
-            }
-            var embed = new Discord.RichEmbed()
-                        .setColor("#3b5998")
-						//.setAuthor(res.name, res.picture.data.url, res.link)
-                        //.setTitle(res.posts.data[0].story)
-						.setTitle(res.name)
-                        .setURL(res.link)
-                        .setDescription(res.posts.data[0].message)
-                        .setImage(res.cover.source)
-                        .setThumbnail(res.picture.data.url)
-                        //.addField("Likes", res.numFollowers, true)
-						.setFooter("Facebook", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/F_icon.svg/200px-F_icon.svg.png");
+			if(server.discordChannels.length === 0) {
+				defaultChannel = guild.channels.find("type", "text");
+			} else {
+				for(let i = 0; i < server.discordChannels.length; i++) {
+					channels.push(guild.channels.find("name", server.discordChannels[i]));
+				}
+			}
+			var embed = new Discord.RichEmbed()
+				.setColor("#3b5998")
+				.setTitle(res.name)
+				.setURL(res.link)
+				.setDescription(res.posts.data[0].message)
+				.setImage(res.cover.source)
+				.setThumbnail(res.picture.data.url)
+				.setFooter("Facebook", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/F_icon.svg/200px-F_icon.svg.png");
 
-            if(channels.length !== 0){
-                for(let i = 0; i < channels.length; i++){
+			if(channels.length !== 0) {
+				for(let i = 0; i < channels.length; i++) {
 					channels[i].send(embed).then(
-                        print("Sent Facebook embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
-                }
-                facebookPage.timestamp = res.posts.data[0].created_time;
-            }else if(defaultChannel){
+						print("Sent Facebook embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
+				}
+				facebookPage.timestamp = res.posts.data[0].created_time;
+			} else if(defaultChannel) {
 				defaultChannel.send(embed).then(
-                    print("Sent Facebook embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
-                facebookPage.timestamp = res.posts.data[0].created_time;
-            }
-        }
-        catch(err){
-            print(err);
-        }
+					print("Sent Facebook embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
+				facebookPage.timestamp = res.posts.data[0].created_time;
+			}
+		} catch(err) {
+			print(err);
+		}
 	}
 }
 
-function tick(){
-    for(let i = 0; i < servers.length; i++){
-		for(let k = -1; k < servers[i].discordChannels.length; k++){
-			for(let j = 0; j < servers[i].twitchChannels.length; j++){
-				if(servers[i].twitchChannels[j]){
+function tick() {
+	for(let i = 0; i < servers.length; i++) {
+		for(let k = -1; k < servers[i].discordChannels.length; k++) {
+			for(let j = 0; j < servers[i].twitchChannels.length; j++) {
+				if(servers[i].twitchChannels[j]) {
 					callTwitchApi(servers[i], servers[i].twitchChannels[j], twitchApiCallback, true);
 				}
 			}
-			
-			for(let j = 0; j < servers[i].twitterFeeds.length; j++){
-				if(servers[i].twitterFeeds[j]){
+			for(let j = 0; j < servers[i].twitterFeeds.length; j++) {
+				if(servers[i].twitterFeeds[j]) {
 					callTwitterApi(servers[i], servers[i].twitterFeeds[j], twitterApiCallback);
 				}
 			}
-			
-			for(let j = 0; j < servers[i].youTubeChannels.length; j++){
-				if(servers[i].youTubeChannels[j]){
+			for(let j = 0; j < servers[i].youTubeChannels.length; j++) {
+				if(servers[i].youTubeChannels[j]) {
 					callYouTubeApi(servers[i], servers[i].youTubeChannels[j], youTubeApiCallback, false);
 				}
 			}
-			
-			for(let j = 0; j < servers[i].blogSites.length; j++){
-				if(servers[i].blogSites[j]){
+			for(let j = 0; j < servers[i].blogSites.length; j++) {
+				if(servers[i].blogSites[j]) {
 					callWordPressApi(servers[i], servers[i].blogSites[j], wordPressApiCallback);
 				}
 			}
-			
-			for(let j = 0; j < servers[i].mixerChannels.length; j++){
-				if(servers[i].mixerChannels[j]){
+			for(let j = 0; j < servers[i].mixerChannels.length; j++) {
+				if(servers[i].mixerChannels[j]) {
 					callMixerApi(servers[i], servers[i].mixerChannels[j], mixerApiCallback);
 				}
 			}
-			
-			for(let j = 0; j < servers[i].facebookPages.length; j++){
-				if(servers[i].facebookPages[j]){
+			for(let j = 0; j < servers[i].facebookPages.length; j++) {
+				if(servers[i].facebookPages[j]) {
 					callFacebookApi(servers[i], servers[i].facebookPages[j], facebookApiCallback, false);
 				}
 			}
 		}
-    }
+	}
 }
 
-bot.on("message", (message)=>{
-    var server, twitchChannels, twitterFeeds, youTubeChannels, blogSites, customLinks, mixerChannels, bannedWords, facebookPages, userInfos;
-    if(!message.guild){
-        return;
-    } else if (message.author.bot){
+bot.on("message", (message) => {
+	var server, twitchChannels, twitterFeeds, youTubeChannels, blogSites, customLinks, mixerChannels, bannedWords, facebookPages, userInfos;
+	if(!message.guild) {
 		return;
-	}else{
-        let index = indexOfObjectByName(servers, message.guild.name);
-        if(index == -1){
-            servers.push({name: message.guild.name,
-                          lastPrefix: "!", prefix: "/",
-                          role: "botadmin", discordChannels: [],
-                          twitchChannels: [], twitterFeeds: [], youTubeChannels: [], blogSites: [], customLinks: [], mixerChannels: [], bannedWords: [], facebookPages: [], userInfos: []});
-            index = servers.length - 1;
-        }
+	} else if (message.author.bot) {
+		return;
+	} else {
+		let index = indexOfObjectByName(servers, message.guild.name);
+		if(index == -1) {
+			servers.push({
+				name: message.guild.name,
+				lastPrefix: "!", prefix: "/",
+				role: "botadmin", discordChannels: [],
+				twitchChannels: [], twitterFeeds: [], 
+				youTubeChannels: [], blogSites: [], 
+				customLinks: [], mixerChannels: [], 
+				bannedWords: [], facebookPages: [], 
+				userInfos: []
+			});
+			index = servers.length - 1;
+		}
 
-        server =  servers[index];
-        twitchChannels = servers[index].twitchChannels;
+		server =  servers[index];
+		twitchChannels = servers[index].twitchChannels;
 		twitterFeeds = servers[index].twitterFeeds;
 		youTubeChannels = servers[index].youTubeChannels;
 		blogSites = servers[index].blogSites;
@@ -743,14 +709,14 @@ bot.on("message", (message)=>{
 		bannedWords = servers[index].bannedWords;
 		facebookPages = servers[index].facebookPages;
 		userInfos = servers[index].userInfos;
-    }
+	}
 	
-	if(!message.member.hasPermission("MANAGE_GUILD",false,true,true)){
-		if(message.channel.permissionsFor(bot.user).hasPermission("MANAGE_MESSAGES",false)){
+	if(!message.member.hasPermission("MANAGE_GUILD",false,true,true)) {
+		if(message.channel.permissionsFor(bot.user).hasPermission("MANAGE_MESSAGES",false)) {
 			let messageWords = message.content.split(" ");
-			for(let a = 0; a < messageWords.length; a++){
-				for(let b = 0; b < bannedWords.length; b++){
-					if(messageWords[a].replace(".","").replace("!","").replace(",","").replace("?","").trim() == bannedWords[b].trim()){
+			for(let a = 0; a < messageWords.length; a++) {
+				for(let b = 0; b < bannedWords.length; b++) {
+					if(messageWords[a].replace(".","").replace("!","").replace(",","").replace("?","").trim() == bannedWords[b].trim()) {
 						message.reply("your message was deleted for containing a banned word.");
 						message.delete();
 						print("Deleted message from " + message.author + " in server " + message.guild.name + " containing the word " + bannedWords[b] + "\nMessage: " + message.content);
@@ -759,22 +725,22 @@ bot.on("message", (message)=>{
 			}
 		}
 	}
-	
-    if(message.content[0] == server.prefix){
-        var permission;
-        try {
-            permission = message.member.roles.exists("name", server.role);
-        }
-        catch(err){
-            print(server.role + " is not a role on the server", err);
-        }
 
-        let index;
-        var streamer;
+	if(message.content[0] == server.prefix) {
+		var permission;
+		try {
+			permission = message.member.roles.exists("name", server.role);
+		} catch(err) {
+			print(server.role + " is not a role on the server", err);
+		}
+
+		let index;
+		var streamer;
 		var site;
 		var channel;
 		var tweeter;
 		var page;
+
 		if (message.content.substring(1,5) == "info") {
 			if (message.content.substring(6,9) == "set") {
 				var discordTag = message.author.tag;
@@ -845,7 +811,7 @@ bot.on("message", (message)=>{
 					msg = "The list is empty.";
 				} else {
 					msg = "\nUser Info List:";
-					for(let u = 0; u < userInfos.length; u++){
+					for(let u = 0; u < userInfos.length; u++) {
 						userInfo = userInfos[u];
 						msg += "\n\nName: " + userInfo.name + "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
 					}
@@ -853,63 +819,63 @@ bot.on("message", (message)=>{
 				message.reply(msg);
 			}
 		} else if (message.content.substring(1,5) == "link") {
-			if(message.content.substring(6,12) == "remove"){
-				if(permission){
+			if(message.content.substring(6,12) == "remove") {
+				if(permission) {
 					linkCommand = message.content.slice(13).trim();
 					index = indexOfObjectByName(customLinks, linkCommand);
-					if(index != -1){
+					if(index != -1) {
 						customLinks.splice(index, 1);
 						index = indexOfObjectByName(customLinks, linkCommand);
-						if(index == -1){
+						if(index == -1) {
 							message.reply("Removed " + linkCommand + ".");
-						}else{
+						} else {
 							message.reply(linkCommand + " isn't in the list.");
 						}
-					}else{
+					} else {
 						message.reply(linkCommand + " isn't in the list.");
 					}
-				}else{
+				} else {
 					message.reply("you're lacking the role _" + server.role + "_.");
 				}
-			} else if(message.content.substring(6,9) == "add"){
-				if(permission){
+			} else if(message.content.substring(6,9) == "add") {
+				if(permission) {
 					resultSplit = message.content.slice(9).trim().split(" ");
 					linkCommand = resultSplit[0];
 					linkLink = resultSplit[1];
 					index = indexOfObjectByName(customLinks, linkCommand);
-					if(index == -1){
+					if(index == -1) {
 						customLinks.push({name: linkCommand, link: linkLink});
 						message.reply("Added " + linkCommand + ".");
-					}else{
+					} else {
 						message.reply(linkCommand + " is already in the list.");
 					}
-				}else{
+				} else {
 					message.reply("you're lacking the role _" + server.role + "_.");
 				}
-			} else if (message.content.substring(6,12) == "update"){
-				if(permission){
+			} else if (message.content.substring(6,12) == "update") {
+				if(permission) {
 					resultSplit = message.content.slice(12).trim().split(" ");
 					linkCommand = resultSplit[0];
 					linkLink = resultSplit[1];
 					index = indexOfObjectByName(customLinks, linkCommand);
-					if(index == -1){
+					if(index == -1) {
 						message.reply(linkCommand + " isn't in the list.");
-					}else{
+					} else {
 						customLinks.splice(index, 1);
 						customLinks.push({name: linkCommand, link: linkLink});
 						message.reply("Updated " + linkCommand + ".");
 					}
-				}else{
+				} else {
 					message.reply("you're lacking the role _" + server.role + "_.");
 				}
-			} else if(message.content.substring(6,10) == "list"){
+			} else if(message.content.substring(6,10) == "list") {
 				var msg = "";
-				for (let h = 0; h < customLinks.length; h++){
+				for (let h = 0; h < customLinks.length; h++) {
 					msg += "\n" + customLinks[h].name + " `" + customLinks[h].link + "`";
 				}
-				if(msg == ""){
+				if(msg == "") {
 					message.reply("The list is empty.");
-				}else{
+				} else {
 					message.reply(msg);
 				}
 			}
@@ -1515,7 +1481,7 @@ bot.on("message", (message)=>{
     }
 });
 
-bot.on("ready", ()=>{
+bot.on("ready", () => {
 	bot.user.setPresence({game:{name:"Knowledge, Strength, Integrity", type:"WATCHING"}});
 });
 
@@ -1524,9 +1490,9 @@ var settingsFile = fs.readFileSync(settingsPath, {encoding:"utf-8"});
 settings = JSON.parse(settingsFile);
 print("File read successfully.");
 
-bot.login(settings.token).then((token)=>{
-    if(token){
-        print("Logged in as " + bot.user.tag);
+bot.login(settings.token).then((token) => {
+	if(token) {
+		print("Logged in as " + bot.user.tag);
 		print("");
 		print("Secrets:");
 		print("Discord Token: " + token);
@@ -1540,20 +1506,19 @@ bot.login(settings.token).then((token)=>{
 		print("");
 		var guildArray = bot.guilds.array();
 		print("Member of " + guildArray.length + " servers");
-		for(let i = 0; i < guildArray.length; i++){
+		for(let i = 0; i < guildArray.length; i++) {
 			print("Serving " + guildArray[i].name + " with " + guildArray[i].memberCount + " users");
 		}
 		print("");
-        print("Reading file " + channelPath + ".");
-        var file = fs.readFileSync(channelPath, {encoding:"utf-8"});
-        servers = JSON.parse(file);
+		print("Reading file " + channelPath + ".");
+		var file = fs.readFileSync(channelPath, {encoding:"utf-8"});
+		servers = JSON.parse(file);
 		print("File read successfully.");
 
-        // tick once on startup
-        tick();
-        setInterval(tick, settings.interval);
-    }else{
-        print("An error occurred while logging in:", err);
-        process.exit(1);
-    }
+		tick();
+		setInterval(tick, settings.interval);
+	} else {
+		print("An error occurred while logging in:", err);
+		process.exit(1);
+	}
 });
