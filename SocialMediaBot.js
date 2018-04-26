@@ -2,10 +2,13 @@ const https = require("https"),
 	fs = require("fs"),
 	Discord = require("discord.js"),
 	bot = new Discord.Client(),
-	channelPath = __dirname + "\\channels",
-	settingsPath = __dirname + "\\settings";
+	logPath = __dirname + "/log",
+	channelPath = __dirname + "/channels",
+	settingsPath = __dirname + "/settings";
 var servers = [];
 var settings;
+var sentBirthdays = false;
+var logs = [];
 
 function leadingZero(d){
 	if(d < 10) {
@@ -20,10 +23,17 @@ function print(msg, err) {
 	var h = leadingZero(date.getHours());
 	var m = leadingZero(date.getMinutes());
 	var s = leadingZero(date.getSeconds());
-
-	console.log("[" + h + ":" + m + ":" + s + "]", msg);
+	
+	var timestamp = "[" + h + ":" + m + ":" + s + "]";
+	console.log(timestamp, msg);
+	
+	newLog = {time: timestamp, message: msg};
+	logs.push(newLog);
+	
 	if(err) {
 		console.log(err);
+		errLog = {time: timestamp, message: err};
+		logs.push(errLog);
 	}
 }
 
@@ -42,8 +52,10 @@ function exitHandler(opt, err) {
 	}
 	if(opt.save) {
 		print("Saving channels to " + channelPath + " before exiting");
-		print(JSON.stringify(servers));
+		//print(JSON.stringify(servers));
 		fs.writeFileSync(channelPath, JSON.stringify(servers, null, 4));
+		print("Saving logs to " + logPath + " before exiting");
+		fs.writeFileSync(logPath, JSON.stringify(logs, null, 4));
 		print("Done");
 	}
 	if(opt.exit) {
@@ -218,7 +230,7 @@ function twitterApiCallback(server, twitterFeed, res) {
 				.setColor("#00aced")
 				.setTitle(res[0].user.name + " (@" + res[0].user.screen_name + ")")
 				.setURL("https://twitter.com/" + res[0].user.screen_name + "/status/" + res[0].id_str)
-				.setDescription(displayMessage)
+				.setDescription(displayMessage.replace("&amp;","&"))
 				.setThumbnail(res[0].user.profile_image_url)
 				.setFooter("Twitter","http://icons.iconarchive.com/icons/uiconstock/socialmedia/512/Twitter-icon.png");
 			if (res[0].entities.media) {
@@ -294,7 +306,7 @@ function callYouTubeApi(server, youTubeChannel, callback, getChannelInfo) {
 }
 
 function youTubeApiCallback(server, youTubeChannel, res) {
-	if(res && res.pageInfo.totalResults > 0 && res.items[0].snippet.publishedAt > youTubeChannel.timestamp) {
+	if(res && res.pageInfo && res.pageInfo.totalResults > 0 && res.items[0].snippet.publishedAt > youTubeChannel.timestamp) {
 		try {
 			var channels = [], defaultChannel;
 			var guild = bot.guilds.find("name", server.name);
@@ -440,9 +452,9 @@ function wordPressSendEmbedCallback(server, blogSite, res, imageLoc) {
 		}
 		var embed = new Discord.RichEmbed()
 			.setColor("#21759b")
-			.setTitle(res[0].title.rendered.replace("&#8211;","-").replace("&#8217;","'"))
+			.setTitle(res[0].title.rendered.replace(/&#8211;/g,"-").replace(/&#8216;/g,"'").replace(/&#8217;/g,"'").replace(/&#8220;/g,"\"").replace(/&#8221;/g,"\""))
 			.setURL(res[0].link)
-			.setDescription(res[0].excerpt.rendered.replace("<p>","").replace("</p>",""))
+			.setDescription(res[0].excerpt.rendered.replace("<p>","").replace("</p>","").replace(/&#8216;/g,"'").replace(/&#8217;/g,"'").replace(/&#8220;/g,"\"").replace(/&#8221;/g,"\""))
 			.setImage(imageLoc)
 			.setFooter("WordPress","https://s.w.org/about/images/wordpress-logo-notext-bg.png");
 		
@@ -552,7 +564,7 @@ function mixerApiCallback(server, mixerChannel, res) {
 	}
 }
 
-function callFacebookApi(server, facebookPage, res, getPageInfo) {
+function callFacebookApi(server, facebookPage, callback, getPageInfo) {
 	var opt;
 	try {
 		var apiPath = '';
@@ -640,7 +652,67 @@ function facebookApiCallback(server, facebookPage, res) {
 	}
 }
 
+function sendBirthday(server, userInfo) {
+	let d = new Date();
+	let month = d.getMonth() + 1;
+	let day = d.getDate();
+	let year = d.getFullYear();
+	try {
+		var channels = [], defaultChannel;
+		var guild = bot.guilds.find("name", server.name);
+
+		if(server.discordChannels.length === 0) {
+			defaultChannel = guild.channels.find("type", "text");
+		} else {
+			for(let i = 0; i < server.discordChannels.length; i++) {
+				channels.push(guild.channels.find("name", server.discordChannels[i]));
+			}
+		}
+		
+		var birthdayMessage = "Happy Birthday <@" + userInfo.name + ">!";
+		if (userInfo.birthYear > 0) {
+			let age = year - userInfo.birthYear;
+			birthdayMessage += "\nWow, " + String(age) + " already.";
+		}
+		
+		var embed = new Discord.RichEmbed()
+			//.setColor("#3b5998")
+			.setTitle("Happy Birthday!")
+			//.setURL(res.link)
+			.setDescription(birthdayMessage)
+			//.setImage(res.cover.source)
+			//.setThumbnail(res.picture.data.url)
+			//.setFooter("Facebook", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/F_icon.svg/200px-F_icon.svg.png");
+
+		if(channels.length !== 0) {
+			for(let i = 0; i < channels.length; i++) {
+				channels[i].send(embed).then(
+					print("Sent birthday embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
+			}
+		} else if(defaultChannel) {
+			defaultChannel.send(embed).then(
+				print("Sent birthday embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
+		}
+	} catch(err) {
+		print(err);
+	}
+}
+
 function tick() {
+	var d = new Date();
+	let month = d.getMonth() + 1;
+	let day = d.getDate();
+	let hour = d.getHours() + 1;
+	let sendBirthdays = false;
+	if (hour < 12) {
+		sentBirthdays = false;
+		sendBirthdays = false;
+	} else if (sentBirthdays == false) {
+		sentBirthdays = true;
+		sendBirthdays = true;
+	} else {
+		sendBirthdays = false;
+	}
 	for(let i = 0; i < servers.length; i++) {
 		for(let k = -1; k < servers[i].discordChannels.length; k++) {
 			for(let j = 0; j < servers[i].twitchChannels.length; j++) {
@@ -674,8 +746,38 @@ function tick() {
 				}
 			}
 		}
+		if (sendBirthdays) {
+			for(let j = 0; j < servers[i].userInfos.length; j++) {
+				if (servers[i].userInfos[j] && servers[i].userInfos[j].birthMonth == month && servers[i].userInfos[j].birthDay == day) {
+					sendBirthday(servers[i], servers[i].userInfos[j]);
+				}
+			}
+		}
 	}
 }
+
+/*bot.on("messageDelete", (message) => {
+	var server;
+	if(!message.guild){
+		return;
+	} else if(message.author.bot) {
+		return;
+	} else {
+		let index = indexOfObjectByName(servers, message.guild.name);
+		if(index == -1) {
+			return;
+		}
+		server = servers[index];
+		if(server.logChannel == ""){
+			return;
+		} else {
+			var guild = bot.guilds.find("name", server.name);
+			var channel = guild.channels.find("name", server.logChannel);
+			var msg = "Message Deleted" + "\nSent At: " + message.createdAt + "\nChannel: " + message.channel.name + "\nAuthor: " + message.author.tag + "\nMessage:\n" + message.content;
+			channel.send(msg);
+		}
+	}
+});*/
 
 bot.on("message", (message) => {
 	var server, twitchChannels, twitterFeeds, youTubeChannels, blogSites, customLinks, mixerChannels, bannedWords, facebookPages, userInfos;
@@ -694,7 +796,7 @@ bot.on("message", (message) => {
 				youTubeChannels: [], blogSites: [], 
 				customLinks: [], mixerChannels: [], 
 				bannedWords: [], facebookPages: [], 
-				userInfos: []
+				userInfos: [], logChannel: ""
 			});
 			index = servers.length - 1;
 		}
@@ -742,14 +844,14 @@ bot.on("message", (message) => {
 		var page;
 
 		if (message.content.substring(1,5) == "info") {
+			var discordTag = message.author.id;
 			if (message.content.substring(6,9) == "set") {
-				var discordTag = message.author.tag;
 				var userInfo;
 				index = indexOfObjectByName(userInfos, discordTag);
 				if (index != -1) {
 					userInfo = userInfos[index];
 				} else {
-					userInfo = {name: discordTag, tag: "", link: ""};
+					userInfo = {name: discordTag, tag: "", link: "", birthMonth: -1, birthDay: -1, birthYear: -1};
 				}
 				
 				if (message.content.substring(10,13) == "tag") {
@@ -759,6 +861,7 @@ bot.on("message", (message) => {
 						return;
 					} else {
 						userInfo.tag = tag;
+						message.reply("Successfully set tag.");
 					}
 				} else if (message.content.substring(10,14) == "link") {
 					let link = message.content.slice(15).trim();
@@ -767,43 +870,89 @@ bot.on("message", (message) => {
 						return;
 					} else {
 						userInfo.link = link;
+						message.reply("Successfully set link.");
+					}
+				} else if (message.content.substring(10,18) == "birthday") {
+					let birthday = message.content.slice(19).trim();
+					let birthdaySplit = birthday.split("/");
+					if (birthday == "" || birthdaySplit.length < 2) {
+						message.reply("please supply a birthday in `MM/DD/YYYY` format (year is optional).");
+						return;
+					} else {
+						let birthdaySplit = birthday.split("/");
+						let birthMonth = parseInt(birthdaySplit[0]);
+						let birthDay = parseInt(birthdaySplit[1]);
+						userInfo.birthMonth = birthMonth;
+						userInfo.birthDay = birthDay;
+						if (birthdaySplit.length == 3) {
+							let birthYear = parseInt(birthdaySplit[2]);
+							userInfo.birthYear = birthYear;
+						}
+						message.reply("Successfully set birthday.");
 					}
 				}
 				
 				if (index == -1) {
 					userInfos.push(userInfo);
 				}
+				
+				//message.reply("Successfully set " + message.content.substring(10,14).trim() + " for " + discordTag + ".");
 			} else if (message.content.substring(6,9) == "get") {
-				let tag = message.content.slice(10).trim().replace("@","");
-				if (tag == "") {
+				var tag = "";
+				if (message.mentions.users.array().length > 0) {
+					let calledUser = message.mentions.users.first();
+					//tag = calledUser.username + "#" + calledUser.discriminator;
+					tag = calledUser.id;
+				} else {
+					//tag = message.content.slice(10).trim().replace("@","");
+				}
+				if (tag == undefined || tag == "") {
 					tag = discordTag;
 				}
 				index = indexOfObjectByName(userInfos, tag);
 				if (index == -1) {
-					message.reply(tag + " doesn't have info set.");
+					message.reply("That user doesn't have info set.");
 				} else {
 					userInfo = userInfos[index];
-					message.reply("\nName: " + tag + "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link);
+					let msg = "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
+					if (userInfo.birthMonth != -1) {
+						msg += "\nBirthday: " + String(userInfo.birthMonth) + "/" + String(userInfo.birthDay);
+						if (userInfo.birthYear != -1) {
+							msg += "/" + String(userInfo.birthYear);
+						}
+					}
+					message.reply(msg);
 				}
 			} else if (message.content.substring(6,12) == "remove") {
-				let tag = message.content.slice(13).trim().replace("@","");
-				if (tag == "") {
+				var tag = "";
+				if (message.mentions.users.array().length > 0) {
+					let calledUser = message.mentions.users.first();
+					//tag = calledUser.username + "#" + calledUser.discriminator;
+					tag = calledUser.id;
+				} else {
+					//tag = message.content.slice(10).trim().replace("@","");
+				}
+				if (tag == undefined || tag == "") {
 					tag = discordTag;
 				}
+				/*let tag = message.content.slice(13).trim().replace("@","");
+				if (tag == "") {
+					tag = discordTag;
+				}*/
 				if (tag != discordTag && !permission) {
 					message.reply("you're lacking the role _" + server.role + "_.");
 					return;
 				}
 				index = indexOfObjectByName(userInfos, tag);
 				if (index == -1) {
-					message.reply(tag + " doesn't have info set.");
+					message.reply("That user doesn't have info set.");
 				} else {
 					userInfos.splice(index, 1);
 					index = indexOfObjectByName(userInfos, tag);
 					if (index == -1) {
-						message.reply("Removed user info for " + tag + ".");
+						message.reply("Removed user info.");
 					} else {
-						message.reply(tag + " doesn't have info set.");
+						message.reply("That user doesn't have info set.");
 					}
 				}
 			} else if (message.content.substring(6,10) == "list") {
@@ -813,7 +962,13 @@ bot.on("message", (message) => {
 					msg = "\nUser Info List:";
 					for(let u = 0; u < userInfos.length; u++) {
 						userInfo = userInfos[u];
-						msg += "\n\nName: " + userInfo.name + "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
+						msg += "\n\nID: " + userInfo.name + "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
+						if (userInfo.birthMonth != -1) {
+							msg += "\nBirthday: " + String(userInfo.birthMonth) + "/" + String(userInfo.birthDay);
+							if (userInfo.birthYear != -1) {
+								msg += "/" + String(userInfo.birthYear);
+							}
+						}
 					}
 				}
 				message.reply(msg);
@@ -1126,7 +1281,7 @@ bot.on("message", (message) => {
 					callYouTubeApi(server, channelObject, (serv, chan, res)=>{
 						if(index != -1){
 							message.reply(channel + " is already in the list.");
-						}else if(res){
+						}else if(res && res.pageInfo){
 							if(res.pageInfo.totalResults == 0){
 								message.reply(channel + " doesn't seem to exist.");
 							}else{
@@ -1159,7 +1314,6 @@ bot.on("message", (message) => {
 				.setColor('GOLD')
 				.setTitle(bot.user.tag)
 				.setAuthor("KSI Discord Bot")
-				//.setURL("https://discordapp.com/oauth2/authorize?client_id=335397266997248000&scope=bot")
 				.setURL("https://discordapp.com/oauth2/authorize?client_id=" + bot.user.id + "&scope=bot")
 				.setDescription("A custom made bot to help push social media updates and allows custom, easy-access links to be created.")
 				.setThumbnail(bot.user.displayAvatarURL)
@@ -1255,7 +1409,17 @@ bot.on("message", (message) => {
                         msg = "Please specify an argument for channel";
                     }
 
-                }else if(message.content.substring(11,18) == "banlist"){
+                } else if(message.content.substring(11,14) == "log") {
+			let channel = message.content.substring(15);
+			if(channel.replace(/\s/g, '').length === 0){
+				msg += "Please specify a channel name";
+			}else if(message.guild.channels.exists("name", channel)){
+				server.logChannel = channel;
+				msg += "Set " + channel + " as the log channel.";
+			}else{
+				msg += channel + " is not a channel on this server.";
+			}
+		} else if(message.content.substring(11,18) == "banlist"){
 					if(message.content.substring(19, 22) == "add"){
 						let word = message.content.substring(23);
 						server.bannedWords.push(word);
@@ -1485,6 +1649,10 @@ bot.on("ready", () => {
 	bot.user.setPresence({game:{name:"Knowledge, Strength, Integrity", type:"WATCHING"}});
 });
 
+var logFile = fs.readFileSync(logPath, {encoding:"utf-8"});
+logs = JSON.parse(logFile);
+print("Log file read successfully from " + logPath + ".");
+
 print("Reading file " + settingsPath + ".");
 var settingsFile = fs.readFileSync(settingsPath, {encoding:"utf-8"});
 settings = JSON.parse(settingsFile);
@@ -1493,16 +1661,16 @@ print("File read successfully.");
 bot.login(settings.token).then((token) => {
 	if(token) {
 		print("Logged in as " + bot.user.tag);
-		print("");
-		print("Secrets:");
-		print("Discord Token: " + token);
-		print("Twitch Client ID: " + settings.twitchClientID);
-		print("Twitter Key: " + settings.twitterKey);
-		print("Twitter Secret: " + settings.twitterSecret);
-		print("Twitter Bearer Token: " + settings.twitterBearerToken);
-		print("YouTube Key: " + settings.youTubeApiKey);
-		print("Facebook Client ID: " + settings.facebookClient);
-		print("Facebook Secret: " + settings.facebookSecret);
+		//print("");
+		//print("Secrets:");
+		//print("Discord Token: " + token);
+		//print("Twitch Client ID: " + settings.twitchClientID);
+		//print("Twitter Key: " + settings.twitterKey);
+		//print("Twitter Secret: " + settings.twitterSecret);
+		//print("Twitter Bearer Token: " + settings.twitterBearerToken);
+		//print("YouTube Key: " + settings.youTubeApiKey);
+		//print("Facebook Client ID: " + settings.facebookClient);
+		//print("Facebook Secret: " + settings.facebookSecret);
 		print("");
 		var guildArray = bot.guilds.array();
 		print("Member of " + guildArray.length + " servers");
