@@ -1,7 +1,7 @@
 const https = require("https"),
 	fs = require("fs"),
 	Discord = require("discord.js"),
-	bot = new Discord.Client(),
+	bot = new Discord.Client({autoReconnect: true}),
 	logPath = __dirname + "/log",
 	channelPath = __dirname + "/channels",
 	settingsPath = __dirname + "/settings";
@@ -699,11 +699,13 @@ function sendBirthday(server, userInfo) {
 }
 
 function tick() {
+	print("Start Tick");
 	var d = new Date();
 	let month = d.getMonth() + 1;
 	let day = d.getDate();
 	let hour = d.getHours() + 1;
 	let sendBirthdays = false;
+	//print("Checking if send");
 	if (hour < 12) {
 		sentBirthdays = false;
 		sendBirthdays = false;
@@ -713,6 +715,7 @@ function tick() {
 	} else {
 		sendBirthdays = false;
 	}
+	//print("Enter Tick Loop");
 	for(let i = 0; i < servers.length; i++) {
 		for(let k = -1; k < servers[i].discordChannels.length; k++) {
 			for(let j = 0; j < servers[i].twitchChannels.length; j++) {
@@ -746,14 +749,19 @@ function tick() {
 				}
 			}
 		}
+		//print("Start Birthday");
 		if (sendBirthdays) {
+			//print("Enter For Loop");
 			for(let j = 0; j < servers[i].userInfos.length; j++) {
+				//print("Check Birthday");
 				if (servers[i].userInfos[j] && servers[i].userInfos[j].birthMonth == month && servers[i].userInfos[j].birthDay == day) {
+					//print("Send Birthday Function");
 					sendBirthday(servers[i], servers[i].userInfos[j]);
 				}
 			}
 		}
 	}
+	//print("End Tick");
 }
 
 /*bot.on("messageDelete", (message) => {
@@ -930,7 +938,7 @@ bot.on("message", (message) => {
 					//tag = calledUser.username + "#" + calledUser.discriminator;
 					tag = calledUser.id;
 				} else {
-					//tag = message.content.slice(10).trim().replace("@","");
+					tag = message.content.slice(13).trim();
 				}
 				if (tag == undefined || tag == "") {
 					tag = discordTag;
@@ -945,12 +953,12 @@ bot.on("message", (message) => {
 				}
 				index = indexOfObjectByName(userInfos, tag);
 				if (index == -1) {
-					message.reply("That user doesn't have info set.");
+					message.reply("That user, " + tag + ", doesn't have info set.");
 				} else {
 					userInfos.splice(index, 1);
 					index = indexOfObjectByName(userInfos, tag);
 					if (index == -1) {
-						message.reply("Removed user info.");
+						message.reply("Removed user info for " + tag + ".");
 					} else {
 						message.reply("That user doesn't have info set.");
 					}
@@ -1314,6 +1322,7 @@ bot.on("message", (message) => {
 				.setColor('GOLD')
 				.setTitle(bot.user.tag)
 				.setAuthor("KSI Discord Bot")
+				//.setURL("https://discordapp.com/oauth2/authorize?client_id=335397266997248000&scope=bot")
 				.setURL("https://discordapp.com/oauth2/authorize?client_id=" + bot.user.id + "&scope=bot")
 				.setDescription("A custom made bot to help push social media updates and allows custom, easy-access links to be created.")
 				.setThumbnail(bot.user.displayAvatarURL)
