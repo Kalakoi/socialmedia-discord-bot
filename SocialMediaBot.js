@@ -25,15 +25,16 @@ function print(msg, err) {
 	var s = leadingZero(date.getSeconds());
 	
 	var timestamp = "[" + h + ":" + m + ":" + s + "]";
-	console.log(timestamp, msg);
-	
-	newLog = {time: timestamp, message: msg};
-	logs.push(newLog);
+	if(msg) {
+		console.log(timestamp, msg);
+		//newLog = {time: timestamp, message: msg};
+		//logs.push(newLog);
+	}
 	
 	if(err) {
-		console.log(err);
-		errLog = {time: timestamp, message: err};
-		logs.push(errLog);
+		console.log(timestamp, err);
+		//errLog = {time: timestamp, message: err};
+		//logs.push(errLog);
 	}
 }
 
@@ -48,7 +49,10 @@ function indexOfObjectByName(array, value) {
 
 function exitHandler(opt, err) {
 	if(err) {
-		print(err);
+		print(`Exception: ${err}`);
+		print(`Message: ${err.message}`);
+		print(`File: ${err.fileName}`);
+		print(`Line: ${err.lineNumber}`);
 	}
 	if(opt.save) {
 		print("Saving channels to " + channelPath + " before exiting");
@@ -66,7 +70,7 @@ function exitHandler(opt, err) {
 process.on("exit", exitHandler.bind(null, {save:true}));
 process.on("SIGINT", exitHandler.bind(null, {exit:true}));
 process.on("SIGTERM", exitHandler.bind(null, {exit:true}));
-process.on("uncaughtException", exitHandler.bind(null, {exit:true}));
+process.on("uncaughtException", (err) => {exitHandler.bind(null, {exit:true}, err);});
 
 function callTwitchApi(server, twitchChannel, callback, getStreamInfo) {
 	var opt;
@@ -533,15 +537,21 @@ function mixerApiCallback(server, mixerChannel, res) {
 			}
 			var embed = new Discord.RichEmbed()
 				.setColor("#1fbaed")
-				.setAuthor(res.user.username, res.user.avatarUrl, "https://mixer.com/" + res.token)
 				.setTitle(res.name)
 				.setURL("https://mixer.com/" + res.token)
 				.setDescription("**" + res.type.parent + "**\n" + res.type.name)
 				.setImage(res.type.backgroundUrl)
-				.setThumbnail(res.thumbnail.url)
 				.addField("Followers", res.numFollowers, true)
 				.addField("Views", res.viewersTotal, true)
-				.setFooter("Mixer", "https://firebottle.tv/projects/mixiversary/images/logo-ball.png");
+				.setFooter("Mixer", "https://raw.githubusercontent.com/mixer/branding-kit/master/png/MixerMerge_Light.png");
+			if (res.thumbnail && res.thumbnail.url) {
+				embed.setThumbnail(res.thumbnail.url);
+			}
+			if (res.user.avatarUrl) {
+				embed.setAuthor(res.user.username, res.user.avatarUrl, "https://mixer.com/" + res.token);
+			} else {
+				embed.setAuthor(res.user.username, "", "https://mixer.com/" + res.token);
+			}	
 
 			if(channels.length !== 0) {
 				for(let i = 0; i < channels.length; i++) {
@@ -676,13 +686,8 @@ function sendBirthday(server, userInfo) {
 		}
 		
 		var embed = new Discord.RichEmbed()
-			//.setColor("#3b5998")
 			.setTitle("Happy Birthday!")
-			//.setURL(res.link)
-			.setDescription(birthdayMessage)
-			//.setImage(res.cover.source)
-			//.setThumbnail(res.picture.data.url)
-			//.setFooter("Facebook", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/F_icon.svg/200px-F_icon.svg.png");
+			.setDescription(birthdayMessage);
 
 		if(channels.length !== 0) {
 			for(let i = 0; i < channels.length; i++) {
@@ -705,7 +710,6 @@ function tick() {
 	let day = d.getDate();
 	let hour = d.getHours() + 1;
 	let sendBirthdays = false;
-	//print("Checking if send");
 	if (hour < 12) {
 		sentBirthdays = false;
 		sendBirthdays = false;
@@ -715,7 +719,6 @@ function tick() {
 	} else {
 		sendBirthdays = false;
 	}
-	//print("Enter Tick Loop");
 	for(let i = 0; i < servers.length; i++) {
 		for(let k = -1; k < servers[i].discordChannels.length; k++) {
 			for(let j = 0; j < servers[i].twitchChannels.length; j++) {
@@ -749,22 +752,18 @@ function tick() {
 				}
 			}
 		}
-		//print("Start Birthday");
 		if (sendBirthdays) {
-			//print("Enter For Loop");
 			for(let j = 0; j < servers[i].userInfos.length; j++) {
-				//print("Check Birthday");
 				if (servers[i].userInfos[j] && servers[i].userInfos[j].birthMonth == month && servers[i].userInfos[j].birthDay == day) {
-					//print("Send Birthday Function");
 					sendBirthday(servers[i], servers[i].userInfos[j]);
 				}
 			}
 		}
 	}
-	//print("End Tick");
+	print("End Tick");
 }
 
-/*bot.on("messageDelete", (message) => {
+bot.on("messageDelete", (message) => {
 	var server;
 	if(!message.guild){
 		return;
@@ -781,11 +780,74 @@ function tick() {
 		} else {
 			var guild = bot.guilds.find("name", server.name);
 			var channel = guild.channels.find("name", server.logChannel);
-			var msg = "Message Deleted" + "\nSent At: " + message.createdAt + "\nChannel: " + message.channel.name + "\nAuthor: " + message.author.tag + "\nMessage:\n" + message.content;
-			channel.send(msg);
+			var embed = new Discord.RichEmbed()
+				.setColor("#C70000")
+				.setTitle("Message Deleted");
+			if(message.channel.name) {
+				embed.addField("Channel", message.channel.name, false); }
+			if(message.author.tag) {
+				embed.addField("Author", message.author.tag, false); }
+			if(message.cleanContent) {
+				embed.addField("Message", message.cleanContent, false); }
+			channel.send(embed);
 		}
 	}
-});*/
+});
+
+bot.on("guildMemberRemove", (member) => {
+	var server;
+	let index = indexOfObjectByName(servers, member.guild.name);
+	if(index == -1) {
+		return;
+	}
+	server = servers[index];
+	if(server.leavingChannel == ""){
+		return;
+	} else {
+		var guild = bot.guilds.find("name", server.name);
+		var channel = guild.channels.find("name", server.leavingChannel);
+		var embed = new Discord.RichEmbed()
+			.setColor("#C70000")
+			.setTitle("Member Left")
+			.addField("Member", member.displayName, false)
+			.addField("Tag", member.user.tag, false);
+		channel.send(embed);
+	}
+});
+
+bot.on("messageUpdate", (oldMessage, newMessage) => {
+	var server;
+	if(!oldMessage.guild){
+		return;
+	} else if(oldMessage.author.bot) {
+		return;
+	} else {
+		let index = indexOfObjectByName(servers, oldMessage.guild.name);
+		if(index == -1) {
+			return;
+		}
+		server = servers[index];
+		if(server.logChannel == "" || oldMessage.cleanContent == newMessage.cleanContent){
+			return;
+		} else {
+			var guild = bot.guilds.find("name", server.name);
+			var channel = guild.channels.find("name", server.logChannel);
+			var embed = new Discord.RichEmbed()
+				.setColor("#C70000");
+			if(newMessage.author.tag) {
+				embed.setTitle("Message Edited By: " + newMessage.author.tag);
+			} else {
+				embed.setTitle("Message Edited"); }
+			if(newMessage.channel.name) {
+				embed.addField("Channel", newMessage.channel.name, false); }
+			if(oldMessage.cleanContent) {
+				embed.addField("Old Message", oldMessage.cleanContent, false); }
+			if(newMessage.cleanContent) {
+				embed.addField("New Message", newMessage.cleanContent, false); }
+			channel.send(embed);
+		}
+	}
+});
 
 bot.on("message", (message) => {
 	var server, twitchChannels, twitterFeeds, youTubeChannels, blogSites, customLinks, mixerChannels, bannedWords, facebookPages, userInfos;
@@ -804,7 +866,8 @@ bot.on("message", (message) => {
 				youTubeChannels: [], blogSites: [], 
 				customLinks: [], mixerChannels: [], 
 				bannedWords: [], facebookPages: [], 
-				userInfos: [], logChannel: ""
+				userInfos: [], logChannel: "", 
+				leavingChannel: ""
 			});
 			index = servers.length - 1;
 		}
@@ -851,7 +914,25 @@ bot.on("message", (message) => {
 		var tweeter;
 		var page;
 
-		if (message.content.substring(1,5) == "info") {
+		if (message.content.substring(1,5) == "roll") {
+			let numDice = message.content.slice(6).trim();
+			let replyMsg = "";
+			if (numDice == undefined || numDice == "") {
+				let diceRoll = Math.floor((Math.random() * 6) + 1);
+				let diceEmote = diceRoll + "die";
+				diceEmote = bot.emojis.find("name", diceEmote);
+				replyMsg += diceEmote.toString();
+			} else {
+				var numRolls = parseInt(numDice);
+				for (let a = 0; a < numRolls; a++) {
+					let diceRoll = Math.floor((Math.random() * 6) + 1);
+					let diceEmote = diceRoll + "die";
+					diceEmote = bot.emojis.find("name", diceEmote);
+					replyMsg += diceEmote.toString();
+				}
+			}
+			message.reply(replyMsg);
+		} else if (message.content.substring(1,5) == "info") {
 			var discordTag = message.author.id;
 			if (message.content.substring(6,9) == "set") {
 				var userInfo;
@@ -903,13 +984,10 @@ bot.on("message", (message) => {
 				if (index == -1) {
 					userInfos.push(userInfo);
 				}
-				
-				//message.reply("Successfully set " + message.content.substring(10,14).trim() + " for " + discordTag + ".");
 			} else if (message.content.substring(6,9) == "get") {
 				var tag = "";
 				if (message.mentions.users.array().length > 0) {
 					let calledUser = message.mentions.users.first();
-					//tag = calledUser.username + "#" + calledUser.discriminator;
 					tag = calledUser.id;
 				} else {
 					//tag = message.content.slice(10).trim().replace("@","");
@@ -935,7 +1013,6 @@ bot.on("message", (message) => {
 				var tag = "";
 				if (message.mentions.users.array().length > 0) {
 					let calledUser = message.mentions.users.first();
-					//tag = calledUser.username + "#" + calledUser.discriminator;
 					tag = calledUser.id;
 				} else {
 					tag = message.content.slice(13).trim();
@@ -943,10 +1020,6 @@ bot.on("message", (message) => {
 				if (tag == undefined || tag == "") {
 					tag = discordTag;
 				}
-				/*let tag = message.content.slice(13).trim().replace("@","");
-				if (tag == "") {
-					tag = discordTag;
-				}*/
 				if (tag != discordTag && !permission) {
 					message.reply("you're lacking the role _" + server.role + "_.");
 					return;
@@ -1322,7 +1395,6 @@ bot.on("message", (message) => {
 				.setColor('GOLD')
 				.setTitle(bot.user.tag)
 				.setAuthor("KSI Discord Bot")
-				//.setURL("https://discordapp.com/oauth2/authorize?client_id=335397266997248000&scope=bot")
 				.setURL("https://discordapp.com/oauth2/authorize?client_id=" + bot.user.id + "&scope=bot")
 				.setDescription("A custom made bot to help push social media updates and allows custom, easy-access links to be created.")
 				.setThumbnail(bot.user.displayAvatarURL)
@@ -1419,16 +1491,26 @@ bot.on("message", (message) => {
                     }
 
                 } else if(message.content.substring(11,14) == "log") {
-			let channel = message.content.substring(15);
-			if(channel.replace(/\s/g, '').length === 0){
-				msg += "Please specify a channel name";
-			}else if(message.guild.channels.exists("name", channel)){
-				server.logChannel = channel;
-				msg += "Set " + channel + " as the log channel.";
-			}else{
-				msg += channel + " is not a channel on this server.";
-			}
-		} else if(message.content.substring(11,18) == "banlist"){
+					let channel = message.content.substring(15);
+					if(channel.replace(/\s/g, '').length === 0){
+						msg += "Please specify a channel name";
+					}else if(message.guild.channels.exists("name", channel)){
+						server.logChannel = channel;
+						msg += "Set " + channel + " as the log channel.";
+					}else{
+						msg += channel + " is not a channel on this server.";
+					}
+				} else if (message.content.substring(11,18) == "leaving"){
+					let channel = message.content.substring(19);
+					if(channel.replace(/\s/g, '').length === 0){
+						msg += "Please specify a channel name";
+					}else if(message.guild.channels.exists("name", channel)){
+						server.leavingChannel = channel;
+						msg += "Set " + channel + " as the log channel.";
+					}else{
+						msg += channel + " is not a channel on this server.";
+					}
+				} else if(message.content.substring(11,18) == "banlist"){
 					if(message.content.substring(19, 22) == "add"){
 						let word = message.content.substring(23);
 						server.bannedWords.push(word);
@@ -1535,6 +1617,8 @@ bot.on("message", (message) => {
 					   "  list        List current configuration\n" +
 					   "  prefix      Character to use in front of commands\n" +
 					   "  role        Role permitting usage of add and remove options on commands\n" +
+					   "  log         Set channel to post edited and deleted messages\n" +
+					   "  leaving     Set channel to post whenever a member leaves the server\n" +
 					   "  channel     Channel(s) to post in, empty list will use the first text channel\n" +
 					   "      add         Add a discord channel to post in\n" +
 					   "      remove      Remove a discord channel from the list\n" +
@@ -1655,6 +1739,7 @@ bot.on("message", (message) => {
 });
 
 bot.on("ready", () => {
+	print("Setting Rich Presence");
 	bot.user.setPresence({game:{name:"Knowledge, Strength, Integrity", type:"WATCHING"}});
 });
 
@@ -1665,6 +1750,11 @@ print("Log file read successfully from " + logPath + ".");
 print("Reading file " + settingsPath + ".");
 var settingsFile = fs.readFileSync(settingsPath, {encoding:"utf-8"});
 settings = JSON.parse(settingsFile);
+print("File read successfully.");
+
+print("Reading file " + channelPath + ".");
+var channelsFile = fs.readFileSync(channelPath, {encoding:"utf-8"});
+servers = JSON.parse(channelsFile);
 print("File read successfully.");
 
 bot.login(settings.token).then((token) => {
@@ -1687,11 +1777,23 @@ bot.login(settings.token).then((token) => {
 			print("Serving " + guildArray[i].name + " with " + guildArray[i].memberCount + " users");
 		}
 		print("");
-		print("Reading file " + channelPath + ".");
-		var file = fs.readFileSync(channelPath, {encoding:"utf-8"});
-		servers = JSON.parse(file);
-		print("File read successfully.");
-
+		
+		print("Generating Message Cache");
+		
+		guildArray.forEach(function(fguild) {
+			let channelArray = fguild.channels.array();
+			channelArray.forEach(function(fchannel) {
+				if (fchannel.type == "text") {
+					//print("Caching " + fchannel.name + " in " + fguild.name);
+					fchannel.fetchMessages({ limit: 50 })
+						.then(messages => print("Successfully cached " + messages.size + " from " + fchannel.name + " in " + fguild.name))
+						.catch(console.error);
+				}
+			});
+		});
+		
+		print("Message Cache Generated Successfully");
+		
 		tick();
 		setInterval(tick, settings.interval);
 	} else {
