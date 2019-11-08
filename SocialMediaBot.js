@@ -27,6 +27,7 @@ function print(msg, err) {
 	var timestamp = "[" + h + ":" + m + ":" + s + "]";
 	if(msg) {
 		console.log(timestamp, msg);
+	
 		//newLog = {time: timestamp, message: msg};
 		//logs.push(newLog);
 	}
@@ -77,9 +78,11 @@ function callTwitchApi(server, twitchChannel, callback, getStreamInfo) {
 	try {
 		var apiPath;
 		if(getStreamInfo) {
-			apiPath = "/kraken/streams/" + twitchChannel.name.trim();
+			//apiPath = "/kraken/streams/" + twitchChannel.name.trim();
+			apiPath = "/helix/streams?user_id=" + twitchChannel.id.trim();
 		} else {
-			apiPath = "/kraken/channels/" + twitchChannel.name.trim();
+			//apiPath = "/kraken/channels/" + twitchChannel.name.trim();
+			apiPath = "/helix/users?login=" + twitchChannel.name.trim();
 		}
 		opt = {
 			host: "api.twitch.tv",
@@ -122,7 +125,7 @@ function callTwitchApi(server, twitchChannel, callback, getStreamInfo) {
 }
 
 function twitchApiCallback(server, twitchChannel, res) {
-	if(res && !twitchChannel.online && res.stream && res.stream.created_at > twitchChannel.timestamp) { 
+	if(res && !twitchChannel.online && res.data[0].type && res.data[0].started_at > twitchChannel.timestamp) { 
 		try {
 			var channels = [], defaultChannel;
 			var guild = bot.guilds.find("name", server.name);
@@ -136,12 +139,13 @@ function twitchApiCallback(server, twitchChannel, res) {
 			}
 			var embed = new Discord.RichEmbed()
 				.setColor("#6441A4")
-				.setTitle(res.stream.channel.display_name.replace(/_/g, "\\_"))
+				.setTitle(res.data[0].user_name.replace(/_/g, "\\_"))
 				.setURL(res.stream.channel.url)
-				.setDescription("**" + res.stream.channel.status + "**\n" + res.stream.game)
-				.setImage(res.stream.preview.large)
-				.setThumbnail(res.stream.channel.logo)
-				.addField("Followers", res.stream.channel.followers, true)
+				.setDescription("**" + res.data[0].title + "**\n" + res.stream.game)
+				.setImage(res.data[0].thumbnail_url)
+				//.setThumbnail(res.stream.channel.logo)
+				//.addField("Followers", res.stream.channel.followers, true)
+				.addField("Viewers", res.data[0].viewer_count, true)
 				.setFooter("Twitch", "https://4shoreg.files.wordpress.com/2015/04/twitch.png");
 
 			if(channels.length !== 0) {
@@ -150,12 +154,12 @@ function twitchApiCallback(server, twitchChannel, res) {
 						print("Sent Twitch embed to channel '" + channels[i].name + "' on server '" + server.name + "'."));
 				}
 				twitchChannel.online = true;
-				twitchChannel.timestamp = res.stream.created_at;
+				twitchChannel.timestamp = res.data[0].started_at;
 			} else if(defaultChannel) {
 				defaultChannel.send(embed).then(
 					print("Sent Twitch embed to channel '" + defaultChannel.name + "' on server '" + server.name + "'."));
 				twitchChannel.online = true;
-				twitchChannel.timestamp = res.stream.created_at;
+				twitchChannel.timestamp = res.data[0].started_at;
 			}
 		} catch(err) {
 			print(err);
@@ -686,8 +690,13 @@ function sendBirthday(server, userInfo) {
 		}
 		
 		var embed = new Discord.RichEmbed()
+			//.setColor("#3b5998")
 			.setTitle("Happy Birthday!")
-			.setDescription(birthdayMessage);
+			//.setURL(res.link)
+			.setDescription(birthdayMessage)
+			//.setImage(res.cover.source)
+			//.setThumbnail(res.picture.data.url)
+			//.setFooter("Facebook", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/F_icon.svg/200px-F_icon.svg.png");
 
 		if(channels.length !== 0) {
 			for(let i = 0; i < channels.length; i++) {
@@ -710,6 +719,7 @@ function tick() {
 	let day = d.getDate();
 	let hour = d.getHours() + 1;
 	let sendBirthdays = false;
+	//print("Checking if send");
 	if (hour < 12) {
 		sentBirthdays = false;
 		sendBirthdays = false;
@@ -719,6 +729,7 @@ function tick() {
 	} else {
 		sendBirthdays = false;
 	}
+	//print("Enter Tick Loop");
 	for(let i = 0; i < servers.length; i++) {
 		for(let k = -1; k < servers[i].discordChannels.length; k++) {
 			for(let j = 0; j < servers[i].twitchChannels.length; j++) {
@@ -752,15 +763,19 @@ function tick() {
 				}
 			}
 		}
+		//print("Start Birthday");
 		if (sendBirthdays) {
+			//print("Enter For Loop");
 			for(let j = 0; j < servers[i].userInfos.length; j++) {
+				//print("Check Birthday");
 				if (servers[i].userInfos[j] && servers[i].userInfos[j].birthMonth == month && servers[i].userInfos[j].birthDay == day) {
+					//print("Send Birthday Function");
 					sendBirthday(servers[i], servers[i].userInfos[j]);
 				}
 			}
 		}
 	}
-	print("End Tick");
+	//print("End Tick");
 }
 
 bot.on("messageDelete", (message) => {
@@ -913,825 +928,964 @@ bot.on("message", (message) => {
 		var channel;
 		var tweeter;
 		var page;
-
-		if (message.content.substring(1,5) == "roll") {
-			let numDice = message.content.slice(6).trim();
-			let replyMsg = "";
-			if (numDice == undefined || numDice == "") {
-				let diceRoll = Math.floor((Math.random() * 6) + 1);
-				let diceEmote = diceRoll + "die";
-				diceEmote = bot.emojis.find("name", diceEmote);
-				replyMsg += diceEmote.toString();
-			} else {
-				var numRolls = parseInt(numDice);
-				for (let a = 0; a < numRolls; a++) {
+		
+		var comSplit = message.content.split(" ");
+		var comm = comSplit[0].replace(server.prefix, "");
+		
+		switch(comm) {
+			case "roll":
+				let numDice = message.content.slice(6).trim();
+				let replyMsg = "";
+				if (numDice == undefined || numDice == "") {
 					let diceRoll = Math.floor((Math.random() * 6) + 1);
 					let diceEmote = diceRoll + "die";
 					diceEmote = bot.emojis.find("name", diceEmote);
 					replyMsg += diceEmote.toString();
-				}
-			}
-			message.reply(replyMsg);
-		} else if (message.content.substring(1,5) == "info") {
-			var discordTag = message.author.id;
-			if (message.content.substring(6,9) == "set") {
-				var userInfo;
-				index = indexOfObjectByName(userInfos, discordTag);
-				if (index != -1) {
-					userInfo = userInfos[index];
-				} else {
-					userInfo = {name: discordTag, tag: "", link: "", birthMonth: -1, birthDay: -1, birthYear: -1};
-				}
-				
-				if (message.content.substring(10,13) == "tag") {
-					let tag = message.content.slice(14).trim();
-					if (tag == "") {
-						message.reply("please supply a tag to set.");
-						return;
-					} else {
-						userInfo.tag = tag;
-						message.reply("Successfully set tag.");
+				} 
+				else {
+					var numRolls = parseInt(numDice);
+					//for (let a = 0; a < numRolls && a < 50; a++) {
+					for (let a = 0; a < numRolls; a++) {
+						let diceRoll = Math.floor((Math.random() * 6) + 1);
+						let diceEmote = diceRoll + "die";
+						diceEmote = bot.emojis.find("name", diceEmote);
+						replyMsg += diceEmote.toString();
 					}
-				} else if (message.content.substring(10,14) == "link") {
-					let link = message.content.slice(15).trim();
-					if (link == "") {
-						message.reply("please supply a link to set.");
-						return;
-					} else {
-						userInfo.link = link;
-						message.reply("Successfully set link.");
+				}
+				message.reply(replyMsg);
+				break;
+			case "info":
+				var discordTag = message.author.id;
+				if (message.content.substring(6,9) == "set") {
+					var userInfo;
+					index = indexOfObjectByName(userInfos, discordTag);
+					if (index != -1) {
+						userInfo = userInfos[index];
+					} 
+					else {
+						userInfo = {name: discordTag, tag: "", link: "", birthMonth: -1, birthDay: -1, birthYear: -1};
 					}
-				} else if (message.content.substring(10,18) == "birthday") {
-					let birthday = message.content.slice(19).trim();
-					let birthdaySplit = birthday.split("/");
-					if (birthday == "" || birthdaySplit.length < 2) {
-						message.reply("please supply a birthday in `MM/DD/YYYY` format (year is optional).");
-						return;
-					} else {
+					
+					if (message.content.substring(10,13) == "tag") {
+						let tag = message.content.slice(14).trim();
+						if (tag == "") {
+							message.reply("please supply a tag to set.");
+							return;
+						} 
+						else {
+							userInfo.tag = tag;
+							message.reply("Successfully set tag.");
+						}
+					} 
+					else if (message.content.substring(10,14) == "link") {
+						let link = message.content.slice(15).trim();
+						if (link == "") {
+							message.reply("please supply a link to set.");
+							return;
+						} 
+						else {
+							userInfo.link = link;
+							message.reply("Successfully set link.");
+						}
+					} 
+					else if (message.content.substring(10,18) == "birthday") {
+						let birthday = message.content.slice(19).trim();
 						let birthdaySplit = birthday.split("/");
-						let birthMonth = parseInt(birthdaySplit[0]);
-						let birthDay = parseInt(birthdaySplit[1]);
-						userInfo.birthMonth = birthMonth;
-						userInfo.birthDay = birthDay;
-						if (birthdaySplit.length == 3) {
-							let birthYear = parseInt(birthdaySplit[2]);
-							userInfo.birthYear = birthYear;
-						}
-						message.reply("Successfully set birthday.");
-					}
-				}
-				
-				if (index == -1) {
-					userInfos.push(userInfo);
-				}
-			} else if (message.content.substring(6,9) == "get") {
-				var tag = "";
-				if (message.mentions.users.array().length > 0) {
-					let calledUser = message.mentions.users.first();
-					tag = calledUser.id;
-				} else {
-					//tag = message.content.slice(10).trim().replace("@","");
-				}
-				if (tag == undefined || tag == "") {
-					tag = discordTag;
-				}
-				index = indexOfObjectByName(userInfos, tag);
-				if (index == -1) {
-					message.reply("That user doesn't have info set.");
-				} else {
-					userInfo = userInfos[index];
-					let msg = "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
-					if (userInfo.birthMonth != -1) {
-						msg += "\nBirthday: " + String(userInfo.birthMonth) + "/" + String(userInfo.birthDay);
-						if (userInfo.birthYear != -1) {
-							msg += "/" + String(userInfo.birthYear);
+						if (birthday == "" || birthdaySplit.length < 2) {
+							message.reply("please supply a birthday in `MM/DD/YYYY` format (year is optional).");
+							return;
+						} 
+						else {
+							let birthdaySplit = birthday.split("/");
+							let birthMonth = parseInt(birthdaySplit[0]);
+							let birthDay = parseInt(birthdaySplit[1]);
+							userInfo.birthMonth = birthMonth;
+							userInfo.birthDay = birthDay;
+							if (birthdaySplit.length == 3) {
+								let birthYear = parseInt(birthdaySplit[2]);
+								userInfo.birthYear = birthYear;
+							}
+							message.reply("Successfully set birthday.");
 						}
 					}
-					message.reply(msg);
-				}
-			} else if (message.content.substring(6,12) == "remove") {
-				var tag = "";
-				if (message.mentions.users.array().length > 0) {
-					let calledUser = message.mentions.users.first();
-					tag = calledUser.id;
-				} else {
-					tag = message.content.slice(13).trim();
-				}
-				if (tag == undefined || tag == "") {
-					tag = discordTag;
-				}
-				if (tag != discordTag && !permission) {
-					message.reply("you're lacking the role _" + server.role + "_.");
-					return;
-				}
-				index = indexOfObjectByName(userInfos, tag);
-				if (index == -1) {
-					message.reply("That user, " + tag + ", doesn't have info set.");
-				} else {
-					userInfos.splice(index, 1);
+					
+					if (index == -1) {
+						userInfos.push(userInfo);
+					}
+					
+					//message.reply("Successfully set " + message.content.substring(10,14).trim() + " for " + discordTag + ".");
+				} 
+				else if (message.content.substring(6,9) == "get") {
+					var tag = "";
+					if (message.mentions.users.array().length > 0) {
+						let calledUser = message.mentions.users.first();
+						//tag = calledUser.username + "#" + calledUser.discriminator;
+						tag = calledUser.id;
+					} 
+					else {
+						//tag = message.content.slice(10).trim().replace("@","");
+					}
+					if (tag == undefined || tag == "") {
+						tag = discordTag;
+					}
 					index = indexOfObjectByName(userInfos, tag);
 					if (index == -1) {
-						message.reply("Removed user info for " + tag + ".");
-					} else {
 						message.reply("That user doesn't have info set.");
-					}
-				}
-			} else if (message.content.substring(6,10) == "list") {
-				if (userInfos.length == 0) {
-					msg = "The list is empty.";
-				} else {
-					msg = "\nUser Info List:";
-					for(let u = 0; u < userInfos.length; u++) {
-						userInfo = userInfos[u];
-						msg += "\n\nID: " + userInfo.name + "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
+					} 
+					else {
+						userInfo = userInfos[index];
+						let msg = "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
 						if (userInfo.birthMonth != -1) {
 							msg += "\nBirthday: " + String(userInfo.birthMonth) + "/" + String(userInfo.birthDay);
 							if (userInfo.birthYear != -1) {
 								msg += "/" + String(userInfo.birthYear);
 							}
 						}
+						message.reply(msg);
 					}
+				} 
+				else if (message.content.substring(6,12) == "remove") {
+					var tag = "";
+					if (message.mentions.users.array().length > 0) {
+						let calledUser = message.mentions.users.first();
+						//tag = calledUser.username + "#" + calledUser.discriminator;
+						tag = calledUser.id;
+					} 
+					else {
+						tag = message.content.slice(13).trim();
+					}
+					if (tag == undefined || tag == "") {
+						tag = discordTag;
+					}
+					/*let tag = message.content.slice(13).trim().replace("@","");
+					if (tag == "") {
+						tag = discordTag;
+					}*/
+					if (tag != discordTag && !permission) {
+						message.reply("you're lacking the role _" + server.role + "_.");
+						return;
+					}
+					index = indexOfObjectByName(userInfos, tag);
+					if (index == -1) {
+						message.reply("That user, " + tag + ", doesn't have info set.");
+					} 
+					else {
+						userInfos.splice(index, 1);
+						index = indexOfObjectByName(userInfos, tag);
+						if (index == -1) {
+							message.reply("Removed user info for " + tag + ".");
+						} 
+						else {
+							message.reply("That user doesn't have info set.");
+						}
+					}
+				} 
+				else if (message.content.substring(6,10) == "list") {
+					if (userInfos.length == 0) {
+						msg = "The list is empty.";
+					} 
+					else {
+						msg = "\nUser Info List:";
+						for(let u = 0; u < userInfos.length; u++) {
+							userInfo = userInfos[u];
+							msg += "\n\nID: " + userInfo.name + "\nTag: " + userInfo.tag + "\nLink: " + userInfo.link;
+							if (userInfo.birthMonth != -1) {
+								msg += "\nBirthday: " + String(userInfo.birthMonth) + "/" + String(userInfo.birthDay);
+								if (userInfo.birthYear != -1) {
+									msg += "/" + String(userInfo.birthYear);
+								}
+							}
+						}
+					}
+					message.reply(msg);
 				}
-				message.reply(msg);
-			}
-		} else if (message.content.substring(1,5) == "link") {
-			if(message.content.substring(6,12) == "remove") {
-				if(permission) {
-					linkCommand = message.content.slice(13).trim();
-					index = indexOfObjectByName(customLinks, linkCommand);
-					if(index != -1) {
-						customLinks.splice(index, 1);
+				break;
+			case "link":
+				if(message.content.substring(6,12) == "remove") {
+					if(permission) {
+						linkCommand = message.content.slice(13).trim();
 						index = indexOfObjectByName(customLinks, linkCommand);
-						if(index == -1) {
-							message.reply("Removed " + linkCommand + ".");
-						} else {
+						if(index != -1) {
+							customLinks.splice(index, 1);
+							index = indexOfObjectByName(customLinks, linkCommand);
+							if(index == -1) {
+								message.reply("Removed " + linkCommand + ".");
+							} 
+							else {
+								message.reply(linkCommand + " isn't in the list.");
+							}
+						} 
+						else {
 							message.reply(linkCommand + " isn't in the list.");
 						}
-					} else {
-						message.reply(linkCommand + " isn't in the list.");
+					} 
+					else {
+						message.reply("you're lacking the role _" + server.role + "_.");
 					}
-				} else {
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-			} else if(message.content.substring(6,9) == "add") {
-				if(permission) {
-					resultSplit = message.content.slice(9).trim().split(" ");
-					linkCommand = resultSplit[0];
-					linkLink = resultSplit[1];
-					index = indexOfObjectByName(customLinks, linkCommand);
-					if(index == -1) {
-						customLinks.push({name: linkCommand, link: linkLink});
-						message.reply("Added " + linkCommand + ".");
-					} else {
-						message.reply(linkCommand + " is already in the list.");
+				} 
+				else if(message.content.substring(6,9) == "add") {
+					if(permission) {
+						resultSplit = message.content.slice(9).trim().split(" ");
+						linkCommand = resultSplit[0];
+						linkLink = resultSplit[1];
+						index = indexOfObjectByName(customLinks, linkCommand);
+						if(index == -1) {
+							customLinks.push({name: linkCommand, link: linkLink});
+							message.reply("Added " + linkCommand + ".");
+						} 
+						else {
+							message.reply(linkCommand + " is already in the list.");
+						}
+					} 
+					else {
+						message.reply("you're lacking the role _" + server.role + "_.");
 					}
-				} else {
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-			} else if (message.content.substring(6,12) == "update") {
-				if(permission) {
-					resultSplit = message.content.slice(12).trim().split(" ");
-					linkCommand = resultSplit[0];
-					linkLink = resultSplit[1];
-					index = indexOfObjectByName(customLinks, linkCommand);
-					if(index == -1) {
-						message.reply(linkCommand + " isn't in the list.");
-					} else {
-						customLinks.splice(index, 1);
-						customLinks.push({name: linkCommand, link: linkLink});
-						message.reply("Updated " + linkCommand + ".");
+				} 
+				else if (message.content.substring(6,12) == "update") {
+					if(permission) {
+						resultSplit = message.content.slice(12).trim().split(" ");
+						linkCommand = resultSplit[0];
+						linkLink = resultSplit[1];
+						index = indexOfObjectByName(customLinks, linkCommand);
+						if(index == -1) {
+							message.reply(linkCommand + " isn't in the list.");
+						} 
+						else {
+							customLinks.splice(index, 1);
+							customLinks.push({name: linkCommand, link: linkLink});
+							message.reply("Updated " + linkCommand + ".");
+						}
+					} 
+					else {
+						message.reply("you're lacking the role _" + server.role + "_.");
 					}
-				} else {
-					message.reply("you're lacking the role _" + server.role + "_.");
+				} 
+				else if(message.content.substring(6,10) == "list") {
+					var mesg = "";
+					for (let h = 0; h < customLinks.length; h++) {
+						mesg += "\n" + customLinks[h].name + " `" + customLinks[h].link + "`";
+					}
+					if(mesg == "") {
+						message.reply("The list is empty.");
+					} 
+					else {
+						message.reply(mesg);
+					}
 				}
-			} else if(message.content.substring(6,10) == "list") {
-				var msg = "";
-				for (let h = 0; h < customLinks.length; h++) {
-					msg += "\n" + customLinks[h].name + " `" + customLinks[h].link + "`";
-				}
-				if(msg == "") {
-					message.reply("The list is empty.");
-				} else {
-					message.reply(msg);
-				}
-			}
-		} else if (message.content.substring(1,5) == "blog" && message.content.trim().length > 6) {
-			if(message.content.substring(6, 12) == "remove"){
-				if(permission){
-					site = message.content.slice(13).trim();
-					index = indexOfObjectByName(blogSites, site);
-					if(index != -1){
-						blogSites.splice(index, 1);
+				break;
+			case "blog":
+				if(message.content.substring(6, 12) == "remove"){
+					if(permission){
+						site = message.content.slice(13).trim();
 						index = indexOfObjectByName(blogSites, site);
-						if(index == -1){
-							message.reply("Removed " + site + ".");
-						}else{
+						if(index != -1){
+							blogSites.splice(index, 1);
+							index = indexOfObjectByName(blogSites, site);
+							if(index == -1){
+								message.reply("Removed " + site + ".");
+							}
+							else{
+								message.reply(site + " isn't in the list.");
+							}
+						}
+						else{
 							message.reply(site + " isn't in the list.");
 						}
-					}else{
-						message.reply(site + " isn't in the list.");
 					}
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-			}else if(message.content.substring(6, 9) == "add"){
-				if(permission){
-					site = message.content.slice(10).trim();
-					var blogSite = {name: site};
-					index = indexOfObjectByName(blogSites, site);
-					callWordPressApi(server, blogSite, (serv, chan, res)=>{
-						if(index != -1){
-							message.reply(site + " is already in the list.");
-						}else if(res){
-							blogSites.push({name: site, timestamp: "2011-09-30T01:14:51.000Z"});
-							message.reply("Added " + site + ".");
-							tick();
-						}else{
-							message.reply(site + " doesn't seem to exist.");
-						}
-					}, false);
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-			}else if(message.content.substring(6, 10) == "list"){
-				var msg = "";
-				for (let w = 0; w < blogSites.length; w++){
-					msg += "\n" + blogSites[w].name;
-				}
-				if(msg == ""){
-					message.reply("The list is empty.");
-				}else{
-					message.reply(msg);
-				}
-			}
-		} else if (message.content.substring(1,6) == "mixer" && message.content.trim().length > 7) {
-			if(message.content.substring(7, 13) == "remove"){
-				if(permission){
-					streamer = message.content.slice(14).trim();
-					index = indexOfObjectByName(mixerChannels, streamer);
-					if(index != -1){
-						mixerChannels.splice(index, 1);
-						index = indexOfObjectByName(mixerChannels, streamer);
-						if(index == -1){
-							message.reply("Removed " + streamer + ".");
-						}else{
-							message.reply(streamer + " isn't in the list.");
-						}
-					}else{
-						message.reply(streamer + " isn't in the list.");
-					}
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(7, 10) == "add"){
-				if(permission){
-					streamer = message.content.slice(11).trim();
-					var channelObject = {name: streamer};
-					index = indexOfObjectByName(mixerChannels, streamer);
-					callMixerApi(server, channelObject, (serv, chan, res)=>{
-						if(index != -1){
-							message.reply(streamer + " is already in the list.");
-						}else if(res){
-							mixerChannels.push({name: streamer, timestamp: "2011-09-30T01:14:51.000Z",
-												 online: false});
-							message.reply("Added " + streamer + ".");
-							tick();
-						}else{
-							message.reply(streamer + " doesn't seem to exist.");
-						}
-					}, false);
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(7, 11) == "list"){
-				let msg = "\n";
-				for(let i = 0; i < mixerChannels.length; i++){
-					var streamStatus;
-					if(mixerChannels[i].online){
-						msg += "**" + mixerChannels[i].name + " online**\n";
-					}else{
-						streamStatus = "offline";
-						msg += mixerChannels[i].name + " offline\n";
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
 					}
 				}
-				if(msg == "\n"){
-					message.reply("The list is empty.");
-				}else{
-					message.reply(msg.replace(/_/g, "\\_"));
-				}
-
-			}
-		} else if (message.content.substring(1,7) == "twitch" && message.content.trim().length > 8) {
-			if(message.content.substring(8, 14) == "remove"){
-				if(permission){
-					streamer = message.content.slice(15).trim();
-					index = indexOfObjectByName(twitchChannels, streamer);
-					if(index != -1){
-						twitchChannels.splice(index, 1);
-						index = indexOfObjectByName(twitchChannels, streamer);
-						if(index == -1){
-							message.reply("Removed " + streamer + ".");
-						}else{
-							message.reply(streamer + " isn't in the list.");
-						}
-					}else{
-						message.reply(streamer + " isn't in the list.");
-					}
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(8, 11) == "add"){
-				if(permission){
-					streamer = message.content.slice(12).trim();
-					var channelObject = {name: streamer};
-					index = indexOfObjectByName(twitchChannels, streamer);
-					callTwitchApi(server, channelObject, (serv, chan, res)=>{
-						if(index != -1){
-							message.reply(streamer + " is already in the list.");
-						}else if(res){
-							twitchChannels.push({name: streamer, timestamp: "2011-09-30T01:14:51.000Z",
-												 online: false});
-							message.reply("Added " + streamer + ".");
-							tick();
-						}else{
-							message.reply(streamer + " doesn't seem to exist.");
-						}
-					}, false);
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(8, 12) == "list"){
-				let msg = "\n";
-				for(let i = 0; i < twitchChannels.length; i++){
-					var streamStatus;
-					if(twitchChannels[i].online){
-						msg += "**" + twitchChannels[i].name + " online**\n";
-					}else{
-						streamStatus = "offline";
-						msg += twitchChannels[i].name + " offline\n";
-					}
-				}
-				if(msg == "\n"){
-					message.reply("The list is empty.");
-				}else{
-					message.reply(msg.replace(/_/g, "\\_"));
-				}
-
-			}
-		} else if (message.content.substring(1,8) == "twitter" && message.content.trim().length > 9) {
-			if(message.content.substring(9, 15) == "remove"){
-				if(permission){
-					tweeter = message.content.slice(16).trim();
-					index = indexOfObjectByName(twitterFeeds, tweeter);
-					if(index != -1){
-						twitterFeeds.splice(index, 1);
-						index = indexOfObjectByName(twitterFeeds, tweeter);
-						if(index == -1){
-							message.reply("Removed " + tweeter + ".");
-						}else{
-							message.reply(tweeter + " isn't in the list.");
-						}
-					}else{
-						message.reply(tweeter + " isn't in the list.");
-					}
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(9, 12) == "add"){
-				if(permission){
-					tweeter = message.content.slice(13).trim();
-					var twitterObject = {name: tweeter};
-					index = indexOfObjectByName(twitterFeeds, tweeter);
-					callTwitterApi(server, twitterObject, (serv, chan, res)=>{
-						if(index != -1){
-							message.reply(tweeter + " is already in the list.");
-						}else if(res){
-							twitterFeeds.push({name: tweeter, timestamp: new Date(-8640000000000000)});
-							message.reply("Added " + tweeter + ".");
-							tick();
-						}else{
-							message.reply(tweeter + " doesn't seem to exist.");
-						}
-					});
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(9, 13) == "list"){
-				let msg = "\n";
-				for(let i = 0; i < twitterFeeds.length; i++){
-					msg += twitterFeeds[i].name + "\n";
-				}
-				if(msg == "\n"){
-					message.reply("The list is empty.");
-				}else{
-					message.reply(msg.replace(/_/g, "\\_"));
-				}
-
-			}
-		} else if(message.content.substring(1,8) == "youtube" && message.content.trim().length > 9){
-			if(message.content.substring(9, 15) == "remove"){
-				if(permission){
-					channel = message.content.slice(15).trim();
-					index = indexOfObjectByName(youTubeChannels, channel);
-					if(index != -1){
-						youTubeChannels.splice(index, 1);
-						index = indexOfObjectByName(youTubeChannels, channel);
-						if(index == -1){
-							message.reply("Removed " + channel + ".");
-						}else{
-							message.reply(channel + " isn't in the list.");
-						}
-					}else{
-						message.reply(channel + " isn't in the list.");
-					}
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(9, 12) == "add"){
-				if(permission){
-					channel = message.content.slice(12).trim();
-					var channelObject = {name: channel};
-					index = indexOfObjectByName(youTubeChannels, channel);
-					callYouTubeApi(server, channelObject, (serv, chan, res)=>{
-						if(index != -1){
-							message.reply(channel + " is already in the list.");
-						}else if(res && res.pageInfo){
-							if(res.pageInfo.totalResults == 0){
-								message.reply(channel + " doesn't seem to exist.");
-							}else{
-								youTubeChannels.push({name: channel, id: res.items[0].id, icon: res.items[0].snippet.thumbnails.high.url, timestamp: "2011-09-30T01:14:51.000Z"});
-								message.reply("Added " + channel + ".");
+				else if(message.content.substring(6, 9) == "add"){
+					if(permission){
+						site = message.content.slice(10).trim();
+						var blogSite = {name: site};
+						index = indexOfObjectByName(blogSites, site);
+						callWordPressApi(server, blogSite, (serv, chan, res)=>{
+							if(index != -1){
+								message.reply(site + " is already in the list.");
+							}
+							else if(res){
+								blogSites.push({name: site, timestamp: "2011-09-30T01:14:51.000Z"});
+								message.reply("Added " + site + ".");
 								tick();
 							}
-						}else{
-							message.reply(channel + " doesn't seem to exist.");
-						}
-					}, true);
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(9, 13) == "list"){
-				let msg = "\n";
-				for(let i = 0; i < youTubeChannels.length; i++){
-					msg += youTubeChannels[i].name + "\n";
-				}
-				if(msg == "\n"){
-					message.reply("The list is empty.");
-				}else{
-					message.reply(msg.replace(/_/g, "\\_"));
-				}
-
-			}
-		}else if (message.content.substring(1,6) == "about"){
-			var embed = new Discord.RichEmbed()
-				.setColor('GOLD')
-				.setTitle(bot.user.tag)
-				.setAuthor("KSI Discord Bot")
-				.setURL("https://discordapp.com/oauth2/authorize?client_id=" + bot.user.id + "&scope=bot")
-				.setDescription("A custom made bot to help push social media updates and allows custom, easy-access links to be created.")
-				.setThumbnail(bot.user.displayAvatarURL)
-				.setImage("http://www.ksiglobal.org/wp-content/uploads/2014/06/ksibannerimage2-300x107.png")
-				.setFooter("Created with love by Kalakoi.")
-				.addField("KSI", "Knowledge, Strength, Integrity", false)
-				.addField("Servers", bot.guilds.array().length, false);
-			message.channel.send(embed);
-		}else if(message.content.substring(1,10) == "configure"){
-            let msg = "";
-			if (message.member.hasPermission("MANAGE_GUILD",false,true,true)) {
-                if(message.content.substring(11, 15) == "list"){
-                    msg += "```\n" +
-                           "prefix    " + server.prefix + "\n" +
-                           "role      " + server.role + "\n";
-
-                    msg += "channels  " + server.discordChannels[0];
-                    if(server.discordChannels.length > 1){
-                        msg += ",";
-                    }
-                    msg += "\n";
-
-                    for(let i = 1; i < server.discordChannels.length; i++){
-                        msg += "          " + server.discordChannels[i];
-                        if(i != server.discordChannels.length -1){
-                            msg += ",";
-                        }
-                        msg += "\n";
-                    }
-					
-					msg += "banlist  " + server.bannedWords[0];
-					if(server.bannedWords.length > 1){
-						msg += ",";
+							else{
+								message.reply(site + " doesn't seem to exist.");
+							}
+						}, false);
 					}
-					msg += "\n";
-					for(let i = 1; i < server.bannedWords.length; i++){
-						msg += "          " + server.bannedWords[i];
-						if(i != server.bannedWords.length - 1){
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+				}
+				else if(message.content.substring(6, 10) == "list"){
+					var msag = "";
+					for (let w = 0; w < blogSites.length; w++){
+						msag += "\n" + blogSites[w].name;
+					}
+					if(msag == ""){
+						message.reply("The list is empty.");
+					}
+					else{
+						message.reply(msag);
+					}
+				}
+				break;
+			case "mixer":
+				if(message.content.substring(7, 13) == "remove"){
+					if(permission){
+						streamer = message.content.slice(14).trim();
+						index = indexOfObjectByName(mixerChannels, streamer);
+						if(index != -1){
+							mixerChannels.splice(index, 1);
+							index = indexOfObjectByName(mixerChannels, streamer);
+							if(index == -1){
+								message.reply("Removed " + streamer + ".");
+							}
+							else{
+								message.reply(streamer + " isn't in the list.");
+							}
+						}
+						else{
+							message.reply(streamer + " isn't in the list.");
+						}
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(7, 10) == "add"){
+					if(permission){
+						streamer = message.content.slice(11).trim();
+						var channelObject = {name: streamer};
+						index = indexOfObjectByName(mixerChannels, streamer);
+						callMixerApi(server, channelObject, (serv, chan, res)=>{
+							if(index != -1){
+								message.reply(streamer + " is already in the list.");
+							}
+							else if(res){
+								mixerChannels.push({name: streamer, timestamp: "2011-09-30T01:14:51.000Z",
+													 online: false});
+								message.reply("Added " + streamer + ".");
+								tick();
+							}
+							else{
+								message.reply(streamer + " doesn't seem to exist.");
+							}
+						}, false);
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(7, 11) == "list"){
+					let msg = "\n";
+					for(let i = 0; i < mixerChannels.length; i++){
+						var streamStatus;
+						if(mixerChannels[i].online){
+							msg += "**" + mixerChannels[i].name + " online**\n";
+						}
+						else{
+							streamStatus = "offline";
+							msg += mixerChannels[i].name + " offline\n";
+						}
+					}
+					if(msg == "\n"){
+						message.reply("The list is empty.");
+					}
+					else{
+						message.reply(msg.replace(/_/g, "\\_"));
+					}
+
+				}
+				break;
+			case "twitch":
+				if(message.content.substring(8, 14) == "remove"){
+					if(permission){
+						streamer = message.content.slice(15).trim();
+						index = indexOfObjectByName(twitchChannels, streamer);
+						if(index != -1){
+							twitchChannels.splice(index, 1);
+							index = indexOfObjectByName(twitchChannels, streamer);
+							if(index == -1){
+								message.reply("Removed " + streamer + ".");
+							}
+							else{
+								message.reply(streamer + " isn't in the list.");
+							}
+						}
+						else{
+							message.reply(streamer + " isn't in the list.");
+						}
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(8, 11) == "add"){
+					if(permission){
+						streamer = message.content.slice(12).trim();
+						var channelObject = {name: streamer};
+						index = indexOfObjectByName(twitchChannels, streamer);
+						callTwitchApi(server, channelObject, (serv, chan, res)=>{
+							if(index != -1){
+								message.reply(streamer + " is already in the list.");
+							}
+							else if(res && res.data[0].id){
+								twitchChannels.push({name: streamer, id: res.data[0].id, timestamp: "2011-09-30T01:14:51.000Z",
+													 online: false});
+								message.reply("Added " + streamer + ".");
+								tick();
+							}
+							else{
+								message.reply(streamer + " doesn't seem to exist.");
+							}
+						}, false);
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(8, 12) == "list"){
+					let msg = "\n";
+					for(let i = 0; i < twitchChannels.length; i++){
+						var streamStatus;
+						if(twitchChannels[i].online){
+							msg += "**" + twitchChannels[i].name + " online**\n";
+						}
+						else{
+							streamStatus = "offline";
+							msg += twitchChannels[i].name + " offline\n";
+						}
+					}
+					if(msg == "\n"){
+						message.reply("The list is empty.");
+					}
+					else{
+						message.reply(msg.replace(/_/g, "\\_"));
+					}
+
+				}
+				break;
+			case "twitter":
+				if(message.content.substring(9, 15) == "remove"){
+					if(permission){
+						tweeter = message.content.slice(16).trim();
+						index = indexOfObjectByName(twitterFeeds, tweeter);
+						if(index != -1){
+							twitterFeeds.splice(index, 1);
+							index = indexOfObjectByName(twitterFeeds, tweeter);
+							if(index == -1){
+								message.reply("Removed " + tweeter + ".");
+							}
+							else{
+								message.reply(tweeter + " isn't in the list.");
+							}
+						}
+						else{
+							message.reply(tweeter + " isn't in the list.");
+						}
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(9, 12) == "add"){
+					if(permission){
+						tweeter = message.content.slice(13).trim();
+						var twitterObject = {name: tweeter};
+						index = indexOfObjectByName(twitterFeeds, tweeter);
+						callTwitterApi(server, twitterObject, (serv, chan, res)=>{
+							if(index != -1){
+								message.reply(tweeter + " is already in the list.");
+							}
+							else if(res){
+								twitterFeeds.push({name: tweeter, timestamp: new Date(-8640000000000000)});
+								message.reply("Added " + tweeter + ".");
+								tick();
+							}
+							else{
+								message.reply(tweeter + " doesn't seem to exist.");
+							}
+						});
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(9, 13) == "list"){
+					let msg = "\n";
+					for(let i = 0; i < twitterFeeds.length; i++){
+						msg += twitterFeeds[i].name + "\n";
+					}
+					if(msg == "\n"){
+						message.reply("The list is empty.");
+					}
+					else{
+						message.reply(msg.replace(/_/g, "\\_"));
+					}
+
+				}
+				break;
+			case "youtube":
+				if(message.content.substring(9, 15) == "remove"){
+					if(permission){
+						channel = message.content.slice(15).trim();
+						index = indexOfObjectByName(youTubeChannels, channel);
+						if(index != -1){
+							youTubeChannels.splice(index, 1);
+							index = indexOfObjectByName(youTubeChannels, channel);
+							if(index == -1){
+								message.reply("Removed " + channel + ".");
+							}
+							else{
+								message.reply(channel + " isn't in the list.");
+							}
+						}
+						else{
+							message.reply(channel + " isn't in the list.");
+						}
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(9, 12) == "add"){
+					if(permission){
+						channel = message.content.slice(12).trim();
+						var channelObject = {name: channel};
+						index = indexOfObjectByName(youTubeChannels, channel);
+						callYouTubeApi(server, channelObject, (serv, chan, res)=>{
+							if(index != -1){
+								message.reply(channel + " is already in the list.");
+							}
+							else if(res && res.pageInfo){
+								if(res.pageInfo.totalResults == 0){
+									message.reply(channel + " doesn't seem to exist.");
+								}
+								else{
+									youTubeChannels.push({name: channel, id: res.items[0].id, icon: res.items[0].snippet.thumbnails.high.url, timestamp: "2011-09-30T01:14:51.000Z"});
+									message.reply("Added " + channel + ".");
+									tick();
+								}
+							}
+							else{
+								message.reply(channel + " doesn't seem to exist.");
+							}
+						}, true);
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(9, 13) == "list"){
+					let msg = "\n";
+					for(let i = 0; i < youTubeChannels.length; i++){
+						msg += youTubeChannels[i].name + "\n";
+					}
+					if(msg == "\n"){
+						message.reply("The list is empty.");
+					}
+					else{
+						message.reply(msg.replace(/_/g, "\\_"));
+					}
+
+				}
+				break;
+			case "about":
+				var embed = new Discord.RichEmbed()
+					.setColor('GOLD')
+					.setTitle(bot.user.tag)
+					.setAuthor("KSI Discord Bot")
+					.setURL("https://discordapp.com/oauth2/authorize?client_id=" + bot.user.id + "&scope=bot")
+					.setDescription("A custom made bot to help push social media updates and allows custom, easy-access links to be created.")
+					.setThumbnail(bot.user.displayAvatarURL)
+					.setImage("http://www.ksiglobal.org/wp-content/uploads/2014/06/ksibannerimage2-300x107.png")
+					.setFooter("Created with love by Kalakoi.")
+					.addField("KSI", "Knowledge, Strength, Integrity", false)
+					.addField("Servers", bot.guilds.array().length, false);
+				message.channel.send(embed);
+				break;
+			case "configure":
+				let msg = "";
+				if (message.member.hasPermission("MANAGE_GUILD",false,true,true)) {
+					if(message.content.substring(11, 15) == "list"){
+						msg += "```\n" +
+							   "prefix    " + server.prefix + "\n" +
+							   "role      " + server.role + "\n";
+
+						msg += "channels  " + server.discordChannels[0];
+						if(server.discordChannels.length > 1){
 							msg += ",";
 						}
 						msg += "\n";
+
+						for(let i = 1; i < server.discordChannels.length; i++){
+							msg += "          " + server.discordChannels[i];
+							if(i != server.discordChannels.length -1){
+								msg += ",";
+							}
+							msg += "\n";
+						}
+						
+						msg += "banlist  " + server.bannedWords[0];
+						if(server.bannedWords.length > 1){
+							msg += ",";
+						}
+						msg += "\n";
+						for(let i = 1; i < server.bannedWords.length; i++){
+							msg += "          " + server.bannedWords[i];
+							if(i != server.bannedWords.length - 1){
+								msg += ",";
+							}
+							msg += "\n";
+						}
+						
+						msg += "```";
+
 					}
-					
-                    msg += "```";
+					else if(message.content.substring(11, 17) == "prefix"){
+						let newPrefix = message.content.substring(18, 19);
+						if(newPrefix.replace(/\s/g, '').length === 0){
+							msg += "Please specify an argument";
+						}
+						else if(newPrefix == server.prefix){
+							msg += "Prefix already is " + server.prefix;
+						}
+						else{
+							server.lastPrefix = server.prefix;
+							server.prefix = newPrefix;
+							msg += "Changed prefix to " + server.prefix;
+						}
 
-                }else if(message.content.substring(11, 17) == "prefix"){
-                    let newPrefix = message.content.substring(18, 19);
-                    if(newPrefix.replace(/\s/g, '').length === 0){
-                        msg += "Please specify an argument";
-                    }else if(newPrefix == server.prefix){
-                        msg += "Prefix already is " + server.prefix;
-                    }else{
-                        server.lastPrefix = server.prefix;
-                        server.prefix = newPrefix;
-                        msg += "Changed prefix to " + server.prefix;
-                    }
-
-                }else if(message.content.substring(11, 15) == "role"){
-                    if(message.content.substring(16).replace(/\s/g, '').length === 0){
-                        msg += "Please specify an argument";
-                    }else{
-                        server.role = message.content.substring(16);
-                        msg += "Changed role to " + server.role;
-                    }
-
-                }else if(message.content.substring(11, 18) == "channel"){
-                    if(message.content.substring(19, 22) == "add"){
-                        let channel = message.content.substring(23);
-                        if(channel.replace(/\s/g, '').length === 0){
-                            msg += "Please specify an argument";
-                        }else if(message.guild.channels.exists("name", channel)){
-                            server.discordChannels.push(channel);
-                            msg += "Added " + channel + " to list of channels to post in.";
-                        }else{
-                            msg += channel + " does not exist on this server.";
-                        }
-
-                    }else if(message.content.substring(19, 25) == "remove"){
-                        for(let i = server.discordChannels.length; i >= 0; i--){
-                            let channel = message.content.substring(26);
-                            if(channel.replace(/\s/g, '').length === 0){
-                                msg = "Please specify an argument";
-                                break;
-                            }else if(server.discordChannels[i] == channel){
-                                server.discordChannels.splice(i, 1);
-                                msg = "Removed " + channel + " from list of channels to post in.";
-                                break;
-                            }else{
-                                msg = channel + " does not exist in list.";
-                            }
-                        }
-                    }else{
-                        msg = "Please specify an argument for channel";
-                    }
-
-                } else if(message.content.substring(11,14) == "log") {
-					let channel = message.content.substring(15);
-					if(channel.replace(/\s/g, '').length === 0){
-						msg += "Please specify a channel name";
-					}else if(message.guild.channels.exists("name", channel)){
-						server.logChannel = channel;
-						msg += "Set " + channel + " as the log channel.";
-					}else{
-						msg += channel + " is not a channel on this server.";
 					}
-				} else if (message.content.substring(11,18) == "leaving"){
-					let channel = message.content.substring(19);
-					if(channel.replace(/\s/g, '').length === 0){
-						msg += "Please specify a channel name";
-					}else if(message.guild.channels.exists("name", channel)){
-						server.leavingChannel = channel;
-						msg += "Set " + channel + " as the log channel.";
-					}else{
-						msg += channel + " is not a channel on this server.";
+					else if(message.content.substring(11, 15) == "role"){
+						if(message.content.substring(16).replace(/\s/g, '').length === 0){
+							msg += "Please specify an argument";
+						}
+						else{
+							server.role = message.content.substring(16);
+							msg += "Changed role to " + server.role;
+						}
+
 					}
-				} else if(message.content.substring(11,18) == "banlist"){
-					if(message.content.substring(19, 22) == "add"){
-						let word = message.content.substring(23);
-						server.bannedWords.push(word);
-						msg += "Added " + word + " to the list of banned words.";
-					}else if(message.content.substring(19, 25) == "remove"){
-						let word = message.content.substring(26);
-						for(let i = server.bannedWords.length; i >= 0; i--){
-							if(server.bannedWords[i] == word){
-								server.bannedWords.splice(i, 1);
-								msg = "Removed " + word + " from the list of banned words.";
-								break;
-							} else {
-								msg = word + " does not exist in the banned words list.";
+					else if(message.content.substring(11, 18) == "channel"){
+						if(message.content.substring(19, 22) == "add"){
+							let channel = message.content.substring(23);
+							if(channel.replace(/\s/g, '').length === 0){
+								msg += "Please specify an argument";
+							}
+							else if(message.guild.channels.exists("name", channel)){
+								server.discordChannels.push(channel);
+								msg += "Added " + channel + " to list of channels to post in.";
+							}
+							else{
+								msg += channel + " does not exist on this server.";
+							}
+
+						}
+						else if(message.content.substring(19, 25) == "remove"){
+							for(let i = server.discordChannels.length; i >= 0; i--){
+								let channel = message.content.substring(26);
+								if(channel.replace(/\s/g, '').length === 0){
+									msg = "Please specify an argument";
+									break;
+								}
+								else if(server.discordChannels[i] == channel){
+									server.discordChannels.splice(i, 1);
+									msg = "Removed " + channel + " from list of channels to post in.";
+									break;
+								}
+								else{
+									msg = channel + " does not exist in list.";
+								}
 							}
 						}
-					}else{
-                        msg = "Please specify an argument for banlist";
-                    }
-				}else{
-                    msg += "```\n" +
-                           "Usage: " + server.prefix + "configure OPTION [SUBOPTION] VALUE\n" +
-                           "Example: " + server.prefix + "configure channel add example\n" +
-                           "\nOptions:\n" +
-                           "  list        List current config\n" +
-                           "  prefix      Character to use in front of commands\n" +
-                           "  role        Role permitting usage of add and remove\n" +
-                           "  channel     Channel(s) to post in, empty list will use the first channel\n" +
-                           "      add         Add a discord channel to the list\n" +
-                           "      remove      Remove a discord channel from the list\n" +
+						else{
+							msg = "Please specify an argument for channel";
+						}
+
+					} 
+					else if(message.content.substring(11,14) == "log") {
+						let channel = message.content.substring(15);
+						if(channel.replace(/\s/g, '').length === 0){
+							msg += "Please specify a channel name";
+						}
+						else if(message.guild.channels.exists("name", channel)){
+							server.logChannel = channel;
+							msg += "Set " + channel + " as the log channel.";
+						}
+						else{
+							msg += channel + " is not a channel on this server.";
+						}
+					} 
+					else if (message.content.substring(11,18) == "leaving"){
+						let channel = message.content.substring(19);
+						if(channel.replace(/\s/g, '').length === 0){
+							msg += "Please specify a channel name";
+						}
+						else if(message.guild.channels.exists("name", channel)){
+							server.leavingChannel = channel;
+							msg += "Set " + channel + " as the log channel.";
+						}
+						else{
+							msg += channel + " is not a channel on this server.";
+						}
+					} 
+					else if(message.content.substring(11,18) == "banlist"){
+						if(message.content.substring(19, 22) == "add"){
+							let word = message.content.substring(23);
+							server.bannedWords.push(word);
+							msg += "Added " + word + " to the list of banned words.";
+						}
+						else if(message.content.substring(19, 25) == "remove"){
+							let word = message.content.substring(26);
+							for(let i = server.bannedWords.length; i >= 0; i--){
+								if(server.bannedWords[i] == word){
+									server.bannedWords.splice(i, 1);
+									msg = "Removed " + word + " from the list of banned words.";
+									break;
+								} 
+								else {
+									msg = word + " does not exist in the banned words list.";
+								}
+							}
+						}
+						else{
+							msg = "Please specify an argument for banlist";
+						}
+					}
+					else{
+						msg += "```\n" +
+							   "Usage: " + server.prefix + "configure OPTION [SUBOPTION] VALUE\n" +
+							   "Example: " + server.prefix + "configure channel add example\n" +
+							   "\nOptions:\n" +
+							   "  list        List current config\n" +
+							   "  prefix      Character to use in front of commands\n" +
+							   "  role        Role permitting usage of add and remove\n" +
+							   "  channel     Channel(s) to post in, empty list will use the first channel\n" +
+							   "      add         Add a discord channel to the list\n" +
+							   "      remove      Remove a discord channel from the list\n" +
+							   "  banlist     Word(s) banned on the server, will be immediately deleted\n" +
+							   "      add         Add a word to the banned word list\n" +
+							   "      remove      Remove a word from the banned word list\n" +
+							   "```";
+					}
+				}
+				else{
+					msg += "You are not the server owner.";
+				}
+				message.reply(msg);
+				break;
+			case "facebook":
+				if(message.content.substring(10, 16) == "remove"){
+					if(permission){
+						page = message.content.slice(17).trim();
+						index = indexOfObjectByName(facebookPages, page);
+						if(index != -1){
+							facebookPages.splice(index, 1);
+							index = indexOfObjectByName(facebookPages, page);
+							if(index == -1){
+								message.reply("Removed " + page + ".");
+							}
+							else{
+								message.reply(page + " isn't in the list.");
+							}
+						}
+						else{
+							message.reply(page + " isn't in the list.");
+						}
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(10, 13) == "add"){
+					if(permission){
+						page = message.content.slice(13).trim();
+						var facebookObject = {name: page};
+						index = indexOfObjectByName(facebookPages, page);
+						callFacebookApi(server, facebookObject, (serv, chan, res)=>{
+							if(index != -1){
+								message.reply(page + " is already in the list.");
+							}
+							else if(res){
+								if(res.data.length == 0){
+									message.reply(page + " doesn't seem to exist.");
+								}
+								else{
+									facebookPages.push({name: page, id: res.data[0].id, timestamp: "2011-09-30T01:14:51.000Z"});
+									message.reply("Added " + page + ".");
+									tick();
+								}
+							}
+							else{
+								message.reply(page + " doesn't seem to exist.");
+							}
+						}, true);
+					}
+					else{
+						message.reply("you're lacking the role _" + server.role + "_.");
+					}
+
+				}
+				else if(message.content.substring(10, 14) == "list"){
+					let msg = "\n";
+					for(let i = 0; i < facebookPages.length; i++){
+						msg += facebookPages[i].name + "\n";
+					}
+					if(msg == "\n"){
+						message.reply("The list is empty.");
+					}
+					else{
+						message.reply(msg.replace(/_/g, "\\_"));
+					}
+				}
+				break;
+			case "ping":
+				message.reply('Pong!');
+				break;
+			case "help":
+				if (message.content.substring(6,15) == "configure") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "configure OPTION [SUBOPTION] VALUE\n" +
+						   "Example: " + server.prefix + "configure channel add example\n" +
+						   "\nOptions:\n" +
+						   "  list        List current configuration\n" +
+						   "  prefix      Character to use in front of commands\n" +
+						   "  role        Role permitting usage of add and remove options on commands\n" +
+						   "  channel     Channel(s) to post in, empty list will use the first text channel\n" +
+						   "      add         Add a discord channel to post in\n" +
+						   "      remove      Remove a discord channel from the list\n" +
 						   "  banlist     Word(s) banned on the server, will be immediately deleted\n" +
 						   "      add         Add a word to the banned word list\n" +
 						   "      remove      Remove a word from the banned word list\n" +
-                           "```";
-                }
-
-            }else{
-                msg += "You are not the server owner.";
-            }
-            message.reply(msg);
-
-        } else if (message.content.substring(1,9) === 'facebook' && message.content.length > 10) {
-			if(message.content.substring(10, 16) == "remove"){
-				if(permission){
-					page = message.content.slice(17).trim();
-					index = indexOfObjectByName(facebookPages, page);
-					if(index != -1){
-						facebookPages.splice(index, 1);
-						index = indexOfObjectByName(facebookPages, page);
-						if(index == -1){
-							message.reply("Removed " + page + ".");
-						}else{
-							message.reply(page + " isn't in the list.");
+						   "```";
+				} 
+				else if (message.content.substring(6,12) == "twitch") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "twitch OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "twitch add example\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a Twitch channel to watch\n" +
+						   "  remove      Remove a Twitch channel from the list\n" +
+						   "  list        List all Twitch channels being watched\n" +
+						   "```";
+				} 
+				else if (message.content.substring(6,11) == "mixer") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "mixer OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "mixer add example\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a Mixer channel to watch\n" +
+						   "  remove      Remove a Mixer channel from the list\n" +
+						   "  list        List all Mixer channels being watched\n" +
+						   "```";
+				} 
+				else if (message.content.substring(6,13) == "twitter") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "twitter OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "twitter add example\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a Twitter feed to watch\n" +
+						   "  remove      Remove a Twitter feed from the list\n" +
+						   "  list        List all Twitter feeds being watched\n" +
+						   "```";
+				} 
+				else if (message.content.substring(6,13) == "youtube") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "youtube OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "youtube add example\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a YouTube channel to watch\n" +
+						   "  remove      Remove a YouTube channel from the list\n" +
+						   "  list        List all YouTube channels being watched\n" +
+						   "```";
+				} 
+				else if (message.content.substring(6,10) == "blog") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "blog OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "blog add www.ksiglobal.org\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a WordPress blog to watch\n" +
+						   "  remove      Remove a WordPress blog from the list\n" +
+						   "  list        List all WordPress blogs being watched\n" +
+						   "```";
+				} 
+				else if (message.content.substring(6,10) == "link") {
+					msg = "\n```\n" +
+						   "Usage: " + server.prefix + "link OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "link add https://google.com\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a quick link to the command list\n" +
+						   "  remove      Remove a quick link from the list\n" +
+						   "  list        List all quick links in the command list\n" +
+						   "  update      Updates a command to a new link\n" +
+						   "```";
+				} 
+				else if (message.content.substring(6,14) == "facebook") {
+					msg = "\n```\n" +
+						   "NOT YET IMPLEMENTED\n\n" +
+						   "Usage: " + server.prefix + "facebook OPTION [VALUE]\n" +
+						   "Example: " + server.prefix + "facebook add example\n" +
+						   "\nOptions:\n" +
+						   "  add         Add a Facebook page to watch\n" +
+						   "  remove      Remove a Facebook page from the list\n" +
+						   "  list        List all Facebook page being watched\n" +
+						   "```";
+				} 
+				else {
+					msg = "\n```\n" +
+						   "Available Commands:\n\n" +
+						   "  help      [OPTION]        \n" +
+						   "  about                   \n" +
+						   "  twitch    OPTION [VALUE]\n" +
+						   "  mixer     OPTION [VALUE]\n" +
+						   "  twitter   OPTION [VALUE]\n" +
+						   "  youtube   OPTION [VALUE]\n" +
+						   "  link      OPTION [VALUE]\n" +
+						   "  blog      OPTION [VALUE]\n" +
+						   "  facebook  (Not Yet Implemented)\n" +
+						   "  configure OPTION [SUBOPTION] VALUE\n" +
+						   "\nFor more information on a specific command type:\n" +
+						   server.prefix + "help [COMMAND]\n Example:\n" +
+						   server.prefix + "help twitch\n" +
+						   "```\n```" +
+						   "Custom Commands:\n\n";
+					for (let l = 0; l < customLinks.length; l++) {
+						msg += "  " + customLinks[l].name;
+						for (let w = 0; w < 15 - customLinks[l].name.length; w++) {
+							msg += " ";
 						}
-					}else{
-						message.reply(page + " isn't in the list.");
+						//msg += customLinks[l].link;
+						msg += "\n";
 					}
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
+					msg += "```";
 				}
-
-			}else if(message.content.substring(10, 13) == "add"){
-				if(permission){
-					page = message.content.slice(13).trim();
-					var facebookObject = {name: page};
-					index = indexOfObjectByName(facebookPages, page);
-					callFacebookApi(server, facebookObject, (serv, chan, res)=>{
-						if(index != -1){
-							message.reply(page + " is already in the list.");
-						}else if(res){
-							if(res.data.length == 0){
-								message.reply(page + " doesn't seem to exist.");
-							}else{
-								facebookPages.push({name: page, id: res.data[0].id, timestamp: "2011-09-30T01:14:51.000Z"});
-								message.reply("Added " + page + ".");
-								tick();
-							}
-						}else{
-							message.reply(page + " doesn't seem to exist.");
-						}
-					}, true);
-				}else{
-					message.reply("you're lacking the role _" + server.role + "_.");
-				}
-
-			}else if(message.content.substring(10, 14) == "list"){
-				let msg = "\n";
-				for(let i = 0; i < facebookPages.length; i++){
-					msg += facebookPages[i].name + "\n";
-				}
-				if(msg == "\n"){
-					message.reply("The list is empty.");
-				}else{
-					message.reply(msg.replace(/_/g, "\\_"));
-				}
-			}
-		} else if (message.content.substring(1,5) === 'ping') {
-			message.reply('Pong!');
-		} else if (message.content.substring(1,5) === 'help') {
-			if (message.content.substring(6,15) == "configure") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "configure OPTION [SUBOPTION] VALUE\n" +
-					   "Example: " + server.prefix + "configure channel add example\n" +
-					   "\nOptions:\n" +
-					   "  list        List current configuration\n" +
-					   "  prefix      Character to use in front of commands\n" +
-					   "  role        Role permitting usage of add and remove options on commands\n" +
-					   "  log         Set channel to post edited and deleted messages\n" +
-					   "  leaving     Set channel to post whenever a member leaves the server\n" +
-					   "  channel     Channel(s) to post in, empty list will use the first text channel\n" +
-					   "      add         Add a discord channel to post in\n" +
-					   "      remove      Remove a discord channel from the list\n" +
-					   "  banlist     Word(s) banned on the server, will be immediately deleted\n" +
-					   "      add         Add a word to the banned word list\n" +
-					   "      remove      Remove a word from the banned word list\n" +
-					   "```";
-			} else if (message.content.substring(6,12) == "twitch") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "twitch OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "twitch add example\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a Twitch channel to watch\n" +
-					   "  remove      Remove a Twitch channel from the list\n" +
-					   "  list        List all Twitch channels being watched\n" +
-					   "```";
-			} else if (message.content.substring(6,11) == "mixer") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "mixer OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "mixer add example\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a Mixer channel to watch\n" +
-					   "  remove      Remove a Mixer channel from the list\n" +
-					   "  list        List all Mixer channels being watched\n" +
-					   "```";
-			} else if (message.content.substring(6,13) == "twitter") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "twitter OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "twitter add example\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a Twitter feed to watch\n" +
-					   "  remove      Remove a Twitter feed from the list\n" +
-					   "  list        List all Twitter feeds being watched\n" +
-					   "```";
-			} else if (message.content.substring(6,13) == "youtube") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "youtube OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "youtube add example\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a YouTube channel to watch\n" +
-					   "  remove      Remove a YouTube channel from the list\n" +
-					   "  list        List all YouTube channels being watched\n" +
-					   "```";
-			} else if (message.content.substring(6,10) == "blog") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "blog OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "blog add www.ksiglobal.org\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a WordPress blog to watch\n" +
-					   "  remove      Remove a WordPress blog from the list\n" +
-					   "  list        List all WordPress blogs being watched\n" +
-					   "```";
-			} else if (message.content.substring(6,10) == "link") {
-				msg = "\n```\n" +
-                       "Usage: " + server.prefix + "link OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "link add https://google.com\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a quick link to the command list\n" +
-					   "  remove      Remove a quick link from the list\n" +
-					   "  list        List all quick links in the command list\n" +
-					   "  update      Updates a command to a new link\n" +
-					   "```";
-			} else if (message.content.substring(6,14) == "facebook") {
-				msg = "\n```\n" +
-					   "NOT YET IMPLEMENTED\n\n" +
-                       "Usage: " + server.prefix + "facebook OPTION [VALUE]\n" +
-					   "Example: " + server.prefix + "facebook add example\n" +
-					   "\nOptions:\n" +
-					   "  add         Add a Facebook page to watch\n" +
-					   "  remove      Remove a Facebook page from the list\n" +
-					   "  list        List all Facebook page being watched\n" +
-					   "```";
-			} else {
-				msg = "\n```\n" +
-					   "Available Commands:\n\n" +
-					   "  help      [OPTION]        \n" +
-					   "  about                   \n" +
-					   "  twitch    OPTION [VALUE]\n" +
-					   "  mixer     OPTION [VALUE]\n" +
-					   "  twitter   OPTION [VALUE]\n" +
-					   "  youtube   OPTION [VALUE]\n" +
-					   "  link      OPTION [VALUE]\n" +
-					   "  blog      OPTION [VALUE]\n" +
-					   "  facebook  (Not Yet Implemented)\n" +
-					   "  configure OPTION [SUBOPTION] VALUE\n" +
-					   "\nFor more information on a specific command type:\n" +
-					   server.prefix + "help [COMMAND]\n Example:\n" +
-					   server.prefix + "help twitch\n" +
-					   "```\n```" +
-					   "Custom Commands:\n\n";
-				for (let l = 0; l < customLinks.length; l++) {
-					msg += "  " + customLinks[l].name;
-					for (let w = 0; w < 15 - customLinks[l].name.length; w++) {
-						msg += " ";
+				message.reply(msg);
+				break;
+			default:
+				linkTestCommand = message.content.slice(1).trim();
+				var commandFound = false;
+				for(let l = 0; l < customLinks.length; l++){
+					if(linkTestCommand == customLinks[l].name){
+						commandFound = true;
+						message.reply(customLinks[l].link);
 					}
-					//msg += customLinks[l].link;
-					msg += "\n";
 				}
-				msg += "```";
-			}
-			message.reply(msg);
-		} else {
-            //message.reply("Usage:\n" + server.prefix + "[configure args|list|add channel_name|remove channel_name]");
-			linkTestCommand = message.content.slice(1).trim();
-			var commandFound = false;
-			for(let l = 0; l < customLinks.length; l++){
-				if(linkTestCommand == customLinks[l].name){
-					commandFound = true;
-					message.reply(customLinks[l].link);
-				}
-			}
-        }
-    }else if(message.content[0] == server.lastPrefix){
+		}
+    }
+	else if(message.content[0] == server.lastPrefix){
         message.reply("The prefix was changed from `" + server.lastPrefix +
                       "` to `" + server.prefix +
                       "`. Please use the new prefix.");
@@ -1791,6 +1945,31 @@ bot.login(settings.token).then((token) => {
 				}
 			});
 		});
+		/*for (let a = 0; a < bot.guilds.size; a++) {
+			//var channelArray = guildArray[a].channels.array();
+			for (let b = 0; b < bot.guilds[a].channels.size; b++) {
+				if (bot.guilds[a].channels[b].type == "text" && bot.guilds[a].channels[b].manageable) {
+					print(`Caching messages from ${bot.guilds[a].channels[b].name} in ${bot.guilds[a].channels[b].guild}`);
+					//bot.guilds[a].channels[b].fetchMessages({ limit: 50 })
+						//.then(messages => print(`Cached ${messages.size} messages`));
+				}
+			}
+		}*/
+		//var channelArray = bot.channels.array();
+		//for (let i = 0; i < channelArray.length; i++) {
+			//if (channelArray[i].type == "text") {
+				//print("Caching messages from " + channelArray[i].name + " in " + channelArray[i].guild.name);
+				//let fetchPromise = channelArray[i].fetchMessages({ limit: 10 });
+				//let asyncComplete = false;
+				//fetchPromise.then(messages => {
+					//print("Cached " + messages.array().length + " messages"); 
+					//asyncComplete = true; 
+				//});
+				//while(!asyncComplete){ }
+				//channelArray[i].fetchMessages({ limit: 50 })
+					//.then(messages => print("Cached " + messages.array().length + " messages"));
+			//}
+		//}
 		
 		print("Message Cache Generated Successfully");
 		
